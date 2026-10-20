@@ -1,0 +1,52 @@
+# ==============================================================================
+# QLoRA (4-bit Parameter-Efficient Fine-Tuning) Config for 70B Model
+# ==============================================================================
+# Enables fine-tuning a 70B parameter model on a single 80GB A100/H100 or 2x 40GB GPUs!
+#
+# Memory Footprint:
+#   - 70B base weights in 4-bit NormalFloat (NF4): ~35 GB
+#   - LoRA adapter parameters (r=64, all linear layers): ~1.2 GB
+#   - Optimizer states for trainable adapters: ~4.8 GB
+#   - Total VRAM: ~45 GB (Fits comfortably on a single 80GB GPU!)
+# ==============================================================================
+
+# Quantization Settings (bitsandbytes)
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"               # NormalFloat4 (theoretically optimal for normal weights)
+  bnb_4bit_use_double_quant: true          # Quantizes quantization constants (saves ~0.37 bits/param)
+  bnb_4bit_compute_dtype: "bfloat16"       # Dequantize to bf16 during forward/backward passes
+
+# LoRA Adapter Hyperparameters
+lora:
+  r: 64                                    # Rank of update matrices
+  lora_alpha: 128                          # Scaling factor (alpha / r = 2.0)
+  lora_dropout: 0.05
+  bias: "none"
+  task_type: "CAUSAL_LM"
+  
+  # Target all linear projections in attention and MLP for maximum code performance
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+# Training Hyperparameters
+training:
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 16
+  learning_rate: 0.0002
+  lr_scheduler_type: "cosine"
+  warmup_ratio: 0.03
+  weight_decay: 0.01
+  optim: "paged_adamw_8bit"                # Paged optimizer offloads page memory to CPU on OOM spikes
+  gradient_checkpointing: true
+  fp16: false
+  bf16: true
+  logging_steps: 10
+  save_strategy: "steps"
+  save_steps: 200

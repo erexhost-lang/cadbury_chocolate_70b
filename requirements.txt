@@ -1,0 +1,37 @@
+# ==============================================================================
+# Cadbury-Chocolate 70B Code LLM — Production Dependencies
+# ==============================================================================
+
+# Core Deep Learning & Distributed Training
+torch>=2.2.0
+accelerate>=0.29.0
+deepspeed>=0.14.0
+transformers>=4.40.0
+
+# FlashAttention-2 (Requires CUDA compilation on Ampere/Hopper GPUs)
+flash-attn>=2.5.6
+
+# Parameter-Efficient Fine-Tuning (PEFT) & Quantization
+peft>=0.10.0
+bitsandbytes>=0.43.0
+
+# Data Ingestion & Streaming
+datasets>=2.18.0
+fsspec>=2024.3.1
+requests>=2.31.0
+tqdm>=4.66.0
+
+# Data Cleaning, Syntax Analysis & Deduplication
+datasketch>=1.6.4          # MinHash LSH near-deduplication
+tree-sitter>=0.21.3        # AST parsing for multiple programming languages
+regex>=2024.4.16           # Fast regex engine for PII and secret scrubbing
+
+# Tokenization
+tokenizers>=0.19.0
+sentencepiece>=0.2.0
+
+# Configuration & Logging
+pyyaml>=6.0.1
+wandb>=0.16.6
+rich>=13.7.1
+psutil>=5.9.8

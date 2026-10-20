@@ -1,0 +1,54 @@
+# ==============================================================================
+# PyTorch Fully Sharded Data Parallel (FSDP) Configuration for 70B Model
+# ==============================================================================
+# FULL_SHARD (ZeRO-3 equivalent): Shards parameters, gradients, and optimizer
+# states across all available GPUs in the cluster.
+#
+# Memory Math (Across 32x 80GB H100 GPUs):
+#   - Model Weights (bf16): 140 GB total / 32 = ~4.38 GB per GPU
+#   - Gradients (bf16): 140 GB total / 32 = ~4.38 GB per GPU
+#   - Optimizer States (AdamW fp32): 560 GB total / 32 = ~17.5 GB per GPU
+#   - Total Static Footprint: ~26.26 GB per GPU (Leaves ~53 GB for activations!)
+# ==============================================================================
+
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: FSDP
+downcast_bf16: 'no'
+enable_cpu_affinity: true
+
+fsdp_config:
+  # FULL_SHARD shards weights, gradients, and optimizer states
+  fsdp_sharding_strategy: FULL_SHARD
+  
+  # Auto-wrap each transformer layer individually to enable fine-grained sharding
+  fsdp_auto_wrap_policy: TRANSFORMER_BASED_WRAP
+  fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer
+  
+  # Overlap communication with computation
+  fsdp_backward_prefetch: BACKWARD_PRE
+  fsdp_forward_prefetch: false
+  
+  # Keep in GPU VRAM (set to true only if running on low-memory hardware)
+  fsdp_offload_params: false
+  
+  # State dict checkpointing strategy: saves memory during checkpoint writes
+  fsdp_state_dict_type: SHARDED_STATE_DICT
+  fsdp_sync_module_states: true
+  fsdp_use_orig_params: true
+  fsdp_cpu_ram_efficient_loading: true
+  
+  # Activation checkpointing: recomputes forward activations in backward pass
+  fsdp_activation_checkpointing: true
+
+machine_rank: 0
+main_training_function: main
+mixed_precision: bf16
+num_machines: 1
+num_processes: 8
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false

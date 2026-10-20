@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# Checkpoints & Weights
+checkpoints/
+*.pt
+*.bin
+*.safetensors
+*.pth
+wandb/
+runs/
+logs/
+
+# Data & Cache
+data/
+raw_data/
+processed_data/
+*.tokenized
+*.arrow
+*.parquet
+*.lsh
+*.bin
+
+# HuggingFace & Torch Cache
+.cache/
+hf_cache/
+
+# System & IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
