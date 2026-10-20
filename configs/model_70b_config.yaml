@@ -7,8 +7,8 @@
 #   - Hidden Dim: 8192
 #   - Intermediate Dim (SwiGLU): 28672 (~3.5x hidden_size)
 #   - Attention: Grouped Query Attention (GQA) with 64 Q heads and 8 KV heads
-#   - Vocab: 128,256 tokens (covers multilingual syntax, whitespace, and FIM tags)
-#   - Total Active Parameters: ~70.55 Billion
+#   - Context Window: 32,768 tokens (extended from 8k via YaRN RoPE Scaling)
+#   - Active Parameters: ~70.55 Billion
 # ==============================================================================
 
 model_type: "cadbury_70b"
@@ -20,31 +20,43 @@ hidden_size: 8192
 intermediate_size: 28672
 num_hidden_layers: 80
 num_attention_heads: 64
-num_key_value_heads: 8            # Grouped Query Attention (8:1 ratio) to save KV cache VRAM
+num_key_value_heads: 8            # Grouped Query Attention (8:1 ratio) saves KV cache VRAM
 hidden_act: "silu"               # SwiGLU non-linear activation
 
-# Context & Position Embeddings
-max_position_embeddings: 8192     # 8k token context window (extensible to 32k via YaRN/RoPE scaling)
+# Context & Position Embeddings (Extended to 32k via YaRN)
+max_position_embeddings: 32768
 rope_theta: 500000.0             # High base frequency for long-context stability
-rope_scaling: null
+rope_scaling:
+  type: "yarn"                   # Yet another RoPE extensioN method (YaRN)
+  factor: 4.0                    # 4x scaling (8192 * 4 = 32,768 tokens)
+  original_max_position_embeddings: 8192
+  finetuned: true
 
 # Normalization & Regularization
 rms_norm_eps: 0.00001
 initializer_range: 0.02
 tie_word_embeddings: false        # Untied lm_head for improved code token precision
 
-# Precision & Acceleration
+# Precision & Hardware Acceleration
 torch_dtype: "bfloat16"
 use_cache: true
-attn_implementation: "flash_attention_2"  # Hardware-accelerated memory-efficient attention kernel
+attn_implementation: "flash_attention_2"  # Fused kernel with O(N) memory scaling
 
-# Vocabulary
-vocab_size: 128256
+# Vocabulary & Core Special Tokens
+vocab_size: 128268
 bos_token_id: 128000
 eos_token_id: 128001
 pad_token_id: 128002
 
-# Fill-In-The-Middle (FIM) Special Token IDs
+# Fill-In-The-Middle (FIM) Tokens
 fim_prefix_id: 128003
 fim_middle_id: 128004
 fim_suffix_id: 128005
+
+# Chain-of-Thought (CoT) & Agentic Tool Tokens
+think_start_id: 128006
+think_end_id: 128007
+tool_call_start_id: 128008
+tool_call_end_id: 128009
+tool_output_start_id: 128010
+tool_output_end_id: 128011

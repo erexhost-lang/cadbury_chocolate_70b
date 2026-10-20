@@ -15,11 +15,16 @@ flash-attn>=2.5.6
 peft>=0.10.0
 bitsandbytes>=0.43.0
 
-# Data Ingestion & Streaming
+# Reinforcement Learning with Verifiable Rewards (RLVR / GRPO)
+trl>=0.8.6
+
+# Data Ingestion, Streaming & Schemas
 datasets>=2.18.0
 fsspec>=2024.3.1
 requests>=2.31.0
 tqdm>=4.66.0
+pydantic>=2.6.0
+networkx>=3.2.0            # Directed Graph & Topological Dependency Sorting
 
 # Data Cleaning, Syntax Analysis & Deduplication
 datasketch>=1.6.4          # MinHash LSH near-deduplication
