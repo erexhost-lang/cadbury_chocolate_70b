@@ -43,7 +43,7 @@ use_cache: true
 attn_implementation: "flash_attention_2"  # Fused kernel with O(N) memory scaling
 
 # Vocabulary & Core Special Tokens
-vocab_size: 128268
+vocab_size: 128270
 bos_token_id: 128000
 eos_token_id: 128001
 pad_token_id: 128002
@@ -60,3 +60,21 @@ tool_call_start_id: 128008
 tool_call_end_id: 128009
 tool_output_start_id: 128010
 tool_output_end_id: 128011
+hypothesis_start_id: 128012
+hypothesis_end_id: 128013
+
+# ==============================================================================
+# Adaptive Compute & Surgical RL Parameters
+# ==============================================================================
+adaptive_compute:
+  mtp_num_future_tokens: 2              # DeepSeek-V3 style Multi-Token Prediction lookahead
+  mtp_loss_weight: 0.3                  # Weight of auxiliary MTP prediction loss
+  entropy_early_exit_threshold: 0.45    # Shannon entropy threshold (bits) triggering </think> early exit
+  entropy_window_size: 15               # Moving average token window for entropy calculation
+
+rl_efficiency_penalties:
+  tool_step_penalty: 0.02               # Fixed penalty per tool call to prevent churn
+  unused_file_read_penalty: 0.15        # Penalty per wasted file read polluting context
+  thinking_token_penalty_weight: 0.0005 # Length-penalized RL lambda per excess thought token
+  optimal_think_budget: 150             # Optimal token baseline for concise reasoning
+  anti_hacking_penalty: 3.0             # Severe penalty for test skipping or bare try-except pass

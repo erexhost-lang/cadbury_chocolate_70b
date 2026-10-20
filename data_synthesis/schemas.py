@@ -1,7 +1,8 @@
 """
-Data Schemas for Chain-of-Thought (CoT) and Agentic Tool Interaction
+Data Schemas for Chain-of-Thought (CoT), Bayesian Localization, and Agentic Tool Interaction
 Defines ChatML formats and structured special tokens for 70B reasoning training:
 - <think>...</think> for deliberate algorithmic reflection and architectural trade-offs
+- <hypothesis>...</hypothesis> sub-block for ranked Bayesian localization of root causes
 - <tool_call>...</tool_call> for structured environment actions (ReAct)
 - <tool_output>...</tool_output> for sandbox execution feedback and stack traces
 """
@@ -10,9 +11,11 @@ from enum import Enum
 from typing import List, Dict, Any, Optional
 from pydantic import BaseModel, Field
 
-# Explicit Control Tokens for Reasoning & Tool Calling
+# Explicit Control Tokens for Reasoning, Hypothesis Formation & Tool Calling
 THINK_START = "<think>"
 THINK_END = "</think>"
+HYPOTHESIS_START = "<hypothesis>"
+HYPOTHESIS_END = "</hypothesis>"
 TOOL_CALL_START = "<tool_call>"
 TOOL_CALL_END = "</tool_call>"
 TOOL_OUTPUT_START = "<tool_output>"
@@ -30,6 +33,34 @@ class TrackEnum(str, Enum):
     SYSTEM_DESIGN = "system_design_fault_tolerance"
     DSA_OPTIMIZATION = "dsa_and_optimization"
     MULTI_TURN_DEBUGGING = "multi_turn_tool_debugging"
+
+
+class RankedHypothesisItem(BaseModel):
+    id: str = Field(..., description="Hypothesis identifier, e.g. 'H1', 'H2'")
+    probability: float = Field(..., description="Prior probability between 0.0 and 1.0")
+    suspect_layer: str = Field(..., description="Architecture component: e.g. 'DB_SCHEMA', 'ORM_QUERY', 'API_SERIALIZER'")
+    rationale: str
+    target_file: str
+    target_slice: Optional[List[int]] = Field(None, description="[start_line, end_line] slice")
+
+
+class BayesianHypothesis(BaseModel):
+    """
+    Structured Bayesian Root-Cause Localization block.
+    Forces the model to calculate a prior probability distribution across potential
+    system layers BEFORE reading code or issuing tool calls.
+    """
+    hypotheses: List[RankedHypothesisItem]
+    falsification_plan: str
+
+    def to_xml_format(self) -> str:
+        lines = [f"{HYPOTHESIS_START}", "Ranked Probability Distribution:"]
+        for h in sorted(self.hypotheses, key=lambda x: x.probability, reverse=True):
+            slice_str = f" (lines {h.target_slice[0]}-{h.target_slice[1]})" if h.target_slice else ""
+            lines.append(f"  - [{h.id} | P={h.probability:.2f}] [{h.suspect_layer}] {h.target_file}{slice_str}: {h.rationale}")
+        lines.append(f"Surgical Verification Order: {self.falsification_plan}")
+        lines.append(f"{HYPOTHESIS_END}")
+        return "\n".join(lines)
 
 
 class ToolCall(BaseModel):
@@ -65,14 +96,26 @@ class ChatMessage(BaseModel):
     thought: Optional[str] = Field(
         None, description="Explicit internal reasoning trace placed inside <think>...</think>"
     )
+    hypothesis: Optional[BayesianHypothesis] = Field(
+        None, description="Optional Bayesian hypothesis localization block embedded in <think>"
+    )
     tool_calls: Optional[List[ToolCall]] = None
     tool_outputs: Optional[List[ToolOutput]] = None
 
     def render_content_with_tags(self) -> str:
-        """Renders the message body incorporating <think> and tool tags in canonical order."""
+        """Renders the message body incorporating <think>, <hypothesis>, and tool tags in canonical order."""
         parts = []
-        if self.thought and self.thought.strip():
-            parts.append(f"{THINK_START}\n{self.thought.strip()}\n{THINK_END}")
+        
+        # Assemble reasoning block with hypothesis if present
+        if (self.thought and self.thought.strip()) or self.hypothesis:
+            thought_parts = []
+            if self.hypothesis:
+                thought_parts.append(self.hypothesis.to_xml_format())
+            if self.thought and self.thought.strip():
+                thought_parts.append(self.thought.strip())
+            
+            combined_thought = "\n\n".join(thought_parts)
+            parts.append(f"{THINK_START}\n{combined_thought}\n{THINK_END}")
 
         if self.tool_calls:
             for tc in self.tool_calls:
@@ -124,7 +167,7 @@ class SystemDesignSpec(BaseModel):
     p99_latency_ms: float
     fault_tolerance_requirements: List[str]
     storage_architecture: str
-    compute_infrastructure: str  # e.g., "Kubernetes with HPA and Cilium eBPF"
+    compute_infrastructure: str
 
 
 class DSASpec(BaseModel):
@@ -143,3 +186,6 @@ class DebuggingAgentSpec(BaseModel):
     stack_trace: str
     available_tools: List[str]
     expected_patch: str
+    cross_stack_components: Optional[List[str]] = Field(
+        default_factory=lambda: ["PostgreSQL Schema", "FastAPI ORM Serializer", "React Redux Client"]
+    )

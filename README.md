@@ -2,7 +2,7 @@
 
 A complete, production-grade training architecture, synthetic reasoning pipeline, and execution-verified reinforcement learning framework for a **70-Billion parameter code-generation & reasoning language model**. 
 
-Modeled after modern frontier architectures: **DeepSeek-R1 / DeepSeek-Coder-V2**, **Llama-3-70B**, and **StarCoder2**.
+Modeled after modern frontier architectures: **DeepSeek-R1 / DeepSeek-V3**, **Claude 3.5 Sonnet / Opus**, and **StarCoder2**.
 
 ---
 
@@ -14,30 +14,33 @@ flowchart TD
         A1["Raw Code Streams\n(The Stack v2, GitHub)"] --> A2["AST Import Parsing &\nTopological Repo DAG"]
         A2 --> A3["Fill-In-The-Middle (FIM)\n(50% PSM / SPM)"]
         A3 --> A4["Constant-Length Multipacking\n(32k Context Tokens)"]
-        A4 --> A5["PyTorch FSDP Pretraining\n(FlashAttention-2, bf16)"]
+        A4 --> A5["PyTorch FSDP + MTP Lookahead\n(Multi-Token Prediction Head, bf16)"]
     end
 
-    subgraph Stage2["Stage 2: Synthetic Reasoning & Agentic Data Generation"]
+    subgraph Stage2["Stage 2: Synthetic Reasoning & Bayesian Agent Generation"]
         B1["System Design Track\n(High RPS, SPOF, K8s/IaC)"]
         B2["DSA & Complexity Track\n(Constraints, Big-O, TLE proofs)"]
-        B3["ReAct Debugging Track\n(tool_call, tool_output, patch)"]
-        B1 & B2 & B3 --> B4["Structured ChatML JSONL\n(<think>...</think>, <tool_call>)"]
+        B3["Bayesian Surgical Debugging\n(Ranked Prior Hypotheses)"]
+        B1 & B2 & B3 --> B4["Anti-Rumination Sanitizer\n(Prunes circular self-doubt loops)"]
+        B4 --> B5["Structured ChatML JSONL\n(<think>, <hypothesis>, <tool_call>)"]
     end
 
-    subgraph Stage3["Stage 3: Masked SFT with NEFTune"]
-        B4 --> C1["Completion-Only Collator\n(Masks prompt & tool_output to -100)"]
+    subgraph Stage3["Stage 3: Masked SFT with NEFTune & Entropy Gate"]
+        B5 --> C1["Completion-Only Collator\n(Masks prompt & tool_output to -100)"]
         C1 --> C2["NEFTune Regularization\n(Noisy Embeddings alpha=5.0)"]
         C2 --> C3["YaRN RoPE Scaling\n(32,768 Context Window)"]
         A5 -. Base Weights .-> C3
     end
 
-    subgraph Stage4["Stage 4: Reinforcement Learning with Verifiable Rewards (RLVR)"]
-        C3 --> D1["GRPO Trainer\n(Group Relative Policy Optimization)"]
-        D1 --> R1["Reward 1: Format & Tag Adherence\n(<think> and <tool_call> JSON)"]
-        D1 --> R2["Reward 2: AST Syntax Compilation\n(ast.parse validation)"]
-        D1 --> R3["Reward 3: Execution Sandbox\n(Unit Test Pass Rate & Big-O Speed)"]
-        R1 & R2 & R3 --> D2["Critic-Free Group Advantage\nA_i = (R_i - mean) / std"]
-        D2 --> D3["Final Cadbury-70B-Reasoning Weights"]
+    subgraph Stage4["Stage 4: GRPO with Surgical Efficiency Rewards (RLVR)"]
+        C3 --> D1["GRPO Policy Optimization\n(Group Advantage A_i = (R_i - mean)/std)"]
+        D1 --> R1["Format & Tag Reward\n(<think>, <hypothesis>, JSON)"]
+        D1 --> R2["AST Syntax Reward\n(ast.parse compilation)"]
+        D1 --> R3["Sandbox Execution Reward\n(Unit Test Pass & Big-O Speed)"]
+        D1 --> R4["Length-Penalized Budget\n(-lambda * excess thought tokens)"]
+        D1 --> R5["Information-Gain Tool Reward\n(Penalizes wasted file reads & dumps)"]
+        D1 --> R6["Anti-Reward-Hacking Guardrail\n(Catches test skips & bare try-except)"]
+        R1 & R2 & R3 & R4 & R5 & R6 --> D2["Surgically Aligned 70B Model"]
     end
 ```
 
@@ -54,28 +57,43 @@ flowchart TD
 | **Attention Heads (`n_head`)** | **64** | Multi-head attention (Query dimension = 128) |
 | **KV Heads (`num_kv_heads`)** | **8** | **Grouped-Query Attention (GQA)** (8:1 ratio) to save KV cache |
 | **Context Window** | **32,768 tokens** | Full repository context via **YaRN RoPE Scaling** (factor 4.0) |
-| **Vocabulary Size** | **128,268** | Byte-Level BPE with specialized `<think>`, `<tool_call>`, FIM tags |
+| **Vocabulary Size** | **128,270** | Byte-Level BPE with specialized `<think>`, `<hypothesis>`, `<tool_call>`, FIM tags |
 | **Position Embeddings** | **RoPE ($\theta = 500,000$)** | High base frequency for long-context extrapolation |
 | **Attention Kernel** | **FlashAttention-2** | Hardware-fused $O(N)$ memory attention |
 
-### Parameter Count Derivation
-1. **Self-Attention per layer:**
-   * $W_q: 8192 \times 8192 = 67,108,864$
-   * $W_k: 8192 \times 1024 = 8,388,608$ (GQA 8 heads $\times$ 128 dim)
-   * $W_v: 8192 \times 1024 = 8,388,608$
-   * $W_o: 8192 \times 8192 = 67,108,864$
-   * *Subtotal Attention:* $\approx 150.99\text{ Million params/layer}$
+---
 
-2. **SwiGLU MLP per layer:**
-   * $W_{gate}, W_{up}, W_{down}: 3 \times (8192 \times 28672) = 704,643,072$
-   * *Subtotal MLP:* $\approx 704.64\text{ Million params/layer}$
+## 🧠 Adaptive Compute & Surgical Agentic Localization
 
-3. **Total 80 Transformer Blocks:**
-   * $80 \times (150.99\text{M} + 704.64\text{M}) = \mathbf{68.45\text{ Billion parameters}}$
+Cadbury-Chocolate introduces two critical architectural innovations designed to eliminate the two most common failure modes of reasoning models: **Overthinking on simple queries** and **Context Pollution during debugging**.
 
-4. **Embeddings & Output Head:**
-   * $128,268 \text{ vocab} \times 8,192 \text{ hidden} \times 2 = \mathbf{2.10\text{ Billion parameters}}$
-   * **Total Model Parameters: $\approx \mathbf{70.55\text{ Billion}}$**
+### 1. Bayesian Hypothesis Localization (`data_synthesis/schemas.py`)
+Junior coding models exhibit "blind browsing" — running `ls -R` or opening dozens of files when presented with a bug. Cadbury enforces a **Bayesian prior formulation**:
+* When faced with a multi-tier or cross-stack error (e.g. database to API to frontend), the model **must** calculate a ranked probability distribution across candidate layers inside `<hypothesis>` *before* calling any tool:
+  $$P(H_1 = \text{DB Migration}) = 0.65, \quad P(H_2 = \text{Serializer}) = 0.25, \quad P(H_3 = \text{UI State}) = 0.10$$
+* **Surgical Line Slicing:** Reading whole files is forbidden. Trajectories use `read_file` with explicit `start_line` and `end_line` slices (e.g. lines 35–55) to maximize Context Signal-to-Noise Ratio (SNR).
+
+### 2. Anti-Rumination & Entropy-Aware Early Exit (`training/adaptive_compute.py`)
+* **Shannon Entropy Monitoring:** During generation of `<think>`, the model computes token prediction entropy:
+  $$H(p) = -\sum_{v \in V} p(v) \log_2 p(v)$$
+* **Early Exit Trigger:** When the moving average entropy over a 15-token window is below $\tau = 0.45$ (indicating high certainty / straightforward task), the `EntropyReasoningGate` terminates `<think>` immediately with `</think>\n\n`, answering directly without wasting compute.
+* **Synthetic Filter:** The dataset generator automatically sanitizes repetitive self-doubt loops (*"Wait, let me rethink"*, *"Actually, maybe not"*).
+
+### 3. Multi-Token Prediction (MTP) Lookahead
+* Implements DeepSeek-V3 style **Multi-Token Prediction**:
+  $$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{main}} + \lambda_{\text{MTP}} \sum_{k=1}^2 \mathcal{L}_{\text{MTP}_k}$$
+* Auxiliary prediction heads train the model to anticipate $t+2$ and $t+3$ tokens concurrently, improving structural code planning.
+
+### 4. Surgical Reinforcement Learning Rewards (`training/rl_grpo_verifier.py`)
+In post-SFT GRPO training, policy updates are driven by 6 verifiable reward heads:
+1. **Length-Penalized Thinking Budget:**
+   $$R_{\text{length}} = -\lambda \cdot \max(0, \text{Tokens}_{\text{think}} - B_{\text{optimal}})$$
+   Among rollouts that pass unit tests, assigning the highest reward to the most concise thought process teaches dynamic effort scaling.
+2. **Information-Gain Tool Reward:**
+   * Step penalty ($-0.02$) per tool call to prevent tool churn.
+   * Compares files inspected via `read_file` against files modified in the final git patch. Reading $>2$ irrelevant files incurs a $-0.15$ penalty per wasted read. Blind directory dumps (`ls -R`, `find .`) receive a $-0.5$ penalty. Surgical 1-hop localization receives a $+0.5$ bonus.
+3. **Anti-Reward-Hacking Guardrail:**
+   * Penalizes test-skipping cheats (`@pytest.mark.skip`, `skipTest`), bare `try...except: pass`, and hardcoded return values with a severe $-3.0$ penalty.
 
 ---
 
@@ -101,7 +119,7 @@ flowchart TD
 ```text
 cadbury-chocolate/
 ├── configs/
-│   ├── model_70b_config.yaml     # 70.55B architecture + YaRN RoPE (32k context)
+│   ├── model_70b_config.yaml     # 70.55B architecture + YaRN RoPE (32k) + MTP/RL configs
 │   ├── fsdp_config.yaml          # PyTorch FSDP FULL_SHARD cluster setup
 │   ├── deepspeed_zero3.json      # DeepSpeed ZeRO-3 offload configuration
 │   └── qlora_config.yaml         # 4-bit parameter-efficient fine-tuning config
@@ -116,15 +134,16 @@ cadbury-chocolate/
 │   ├── quality_filter.py         # Line-length, entropy, and autogen heuristics
 │   └── repo_packer_fim.py        # Topological AST import sorting & repo multipacking
 ├── data_synthesis/
-│   ├── schemas.py                # ChatML & XML schemas (<think>, <tool_call>, <tool_output>)
-│   └── generate_reasoning_traces.py # System Design, DSA, & ReAct agent data generator
+│   ├── schemas.py                # BayesianHypothesis, ChatML & XML schemas (<hypothesis>, <think>)
+│   └── generate_reasoning_traces.py # Surgical System Design, DSA, & Anti-Rumination ReAct generator
 ├── tokenization/
-│   ├── train_code_tokenizer.py   # Byte-Level BPE with special tags (<think>, <tool_call>)
+│   ├── train_code_tokenizer.py   # Byte-Level BPE with special tags (<think>, <hypothesis>, <tool_call>)
 │   └── sequence_packer.py        # Zero-waste constant-length multipacking (32k ctx)
 ├── training/
+│   ├── adaptive_compute.py       # Multi-Token Prediction (MTP) & Entropy Early-Exit Gate
 │   ├── pretrain_fsdp.py          # Multi-node FSDP pretrainer with FlashAttention-2
 │   ├── sft_reasoning_trainer.py  # Completion-Only Masked SFT with NEFTune regularizer
-│   ├── rl_grpo_verifier.py       # DeepSeek-R1 style GRPO with 3 verifiable reward functions
+│   ├── rl_grpo_verifier.py       # GRPO with 6 verifiable rewards (length, info-gain, anti-hacking)
 │   ├── train_qlora.py            # 4-bit QLoRA fine-tuning for 70B on 1x 80GB GPU
 │   └── launch_slurm.sh           # HPC SLURM submission script (4 nodes x 8 GPUs)
 ├── utils/
@@ -136,40 +155,9 @@ cadbury-chocolate/
 
 ---
 
-## 🔬 Core Methodologies Explained
-
-### 1. Repository-Level Topological Sorting (`repo_packer_fim.py`)
-Code files are not independent documents. If a model encounters a service calling `User.find_by_id()` before it has seen `class User` in context, it must guess types and signatures.
-* **AST Parsing:** Parses all intra-repository imports (`from models.user import User`).
-* **Directed Acyclic Graph (DAG):** Resolves dependency order using `networkx.topological_sort`.
-* **Result:** Fundamental data structures and interfaces appear *early* in the 32k context, enabling attention heads to attend backwards to exact class definitions.
-
-### 2. Completion-Only SFT Masking (`sft_reasoning_trainer.py`)
-Standard fine-tuning computes loss on both user prompts and assistant completions. In reasoning & tool trajectories:
-* We **MUST NOT** train the model to predict user questions or environment `<tool_output>` strings.
-* The custom collator dynamically sets all prompt and tool output tokens to label `-100`.
-* Gradients are strictly computed on:
-  $$\mathcal{L} = \mathcal{L}_{\text{thought}} + \mathcal{L}_{\text{tool\_call}} + \mathcal{L}_{\text{code}}$$
-
-### 3. NEFTune Regularization (`NEFTuneHook`)
-Synthetic reasoning traces have repetitive rhetorical boilerplate (*"Let me analyze the problem..."*). This can lead to overfitting:
-$$\mathbf{e}' = \mathbf{e} + \boldsymbol{\epsilon}, \quad \boldsymbol{\epsilon} \sim \text{Uniform}(-1, 1) \times \frac{\alpha}{\sqrt{L \cdot d}}$$
-Injecting uniform noise with $\alpha = 5.0$ into embeddings forces the model to generalize underlying logic rather than memorizing synthetic template phrases.
-
-### 4. GRPO with Verifiable Rewards (`rl_grpo_verifier.py`)
-Instead of training an unstable Neural Reward Model, **code can be verified deterministically**:
-1. **Format Reward:** Enforces valid `<think>...</think>` XML blocks and valid JSON tool call arguments.
-2. **AST Syntax Reward:** Parses code with Python's AST compiler. Invalid syntax receives $-1.0$.
-3. **Execution Sandbox Reward:** Executes code against test suites in an isolated subprocess with timeout thresholds.
-   * Tests pass: $+2.0$
-   * Optimal speed ($<200$ms): $+0.5$ bonus
-   * Time limit exceeded (TLE, $O(N^2)$ algorithm): $-1.5$ penalty
-
----
-
 ## 🚀 Cluster Execution Commands
 
-### 1. Generate Synthetic Reasoning Trajectories
+### 1. Generate Surgical Reasoning Trajectories
 ```bash
 python data_synthesis/generate_reasoning_traces.py
 ```
@@ -194,7 +182,7 @@ torchrun \
     --max-seq-len 32768
 ```
 
-### 4. Run Group Relative Policy Optimization (GRPO)
+### 4. Run GRPO Policy Optimization with Length & Info-Gain Rewards
 ```bash
 torchrun --nproc_per_node=8 training/rl_grpo_verifier.py
 ```

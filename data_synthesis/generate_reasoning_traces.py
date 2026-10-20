@@ -1,21 +1,24 @@
 """
 Synthetic Chain-of-Thought (CoT) and Agentic Data Pipeline
-Formats high-grade training samples across 3 specialized tracks:
-1. System Design & Fault Tolerance (High RPS, SPOF analysis, IaC/Kubernetes)
-2. DSA & Asymptotic Optimization (Constraint proofs, Big-O analysis, TLE elimination)
-3. Multi-Turn Tool Calling & Debugging (ReAct loop with tool_call and tool_output)
+Enhanced with:
+1. Bayesian Hypothesis Localization: Formulates ranked probabilities before file inspection.
+2. Surgical Context Rules: Forbids blind dumps, mandates targeted line-range slices.
+3. Anti-Rumination Filter: Detects and eliminates circular backtracking and self-doubt loops.
 """
 
 import json
 import os
+import re
 import sys
-from typing import List, Dict, Any, Generator
+from typing import List, Dict, Any, Generator, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.logger import setup_logger
 from data_synthesis.schemas import (
     THINK_START,
     THINK_END,
+    HYPOTHESIS_START,
+    HYPOTHESIS_END,
     TOOL_CALL_START,
     TOOL_CALL_END,
     TOOL_OUTPUT_START,
@@ -29,9 +32,48 @@ from data_synthesis.schemas import (
     SystemDesignSpec,
     DSASpec,
     DebuggingAgentSpec,
+    RankedHypothesisItem,
+    BayesianHypothesis,
 )
 
 logger = setup_logger("generate_reasoning_traces")
+
+# Patterns associated with low-quality rumination and circular self-doubt
+RUMINATION_PATTERNS = [
+    re.compile(r"(?:wait,\s+let\s+me\s+re-?verify|let\s+me\s+double\s+check\s+again|wait,\s+actually\s+maybe)", re.IGNORECASE),
+    re.compile(r"(?:actually,\s+on\s+second\s+thought,\s+maybe\s+not)", re.IGNORECASE),
+    re.compile(r"(?:let\s+me\s+re-?read\s+the\s+entire\s+prompt\s+carefully)", re.IGNORECASE),
+    re.compile(r"(?:wait,\s+is\s+that\s+right\?\s+let\s+me\s+rethink)", re.IGNORECASE),
+]
+
+
+def anti_rumination_filter(thought: str, max_backtracks: int = 1) -> Tuple[bool, str]:
+    """
+    Scans a reasoning trace for unproductive circular self-doubt loops.
+    Returns:
+        (is_clean, sanitized_or_flagged_thought)
+    """
+    total_rumination_hits = 0
+    cleaned = thought
+
+    for pattern in RUMINATION_PATTERNS:
+        matches = pattern.findall(cleaned)
+        if matches:
+            total_rumination_hits += len(matches)
+            # Remove repetitive filler phrases to streamline context signal-to-noise ratio
+            cleaned = pattern.sub("", cleaned)
+
+    # Check for excessive repetition of the word "wait" or "actually"
+    wait_count = len(re.findall(r"\bwait\b", cleaned, re.IGNORECASE))
+    if wait_count > 3:
+        return False, "Excessive circular self-doubt loops detected."
+
+    if total_rumination_hits > max_backtracks:
+        return False, f"Rumination threshold exceeded ({total_rumination_hits} circular backtrack phrases)."
+
+    # Normalize multiple whitespace created by pruning
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return True, cleaned
 
 
 class SyntheticReasoningPipeline:
@@ -45,10 +87,6 @@ class SyntheticReasoningPipeline:
     # Track 1: System Design & Fault Tolerance Track
     # ==========================================================================
     def build_system_design_sample(self, spec: SystemDesignSpec) -> ReasoningTrajectory:
-        """
-        Creates a system design problem pairing high-throughput requirements with
-        rigorous trade-off analysis in <think> before outputting production architecture code.
-        """
         system_prompt = (
             "You are a Principal Distributed Systems Engineer. When designing backend "
             "infrastructure, you must first reason deeply inside <think>...</think> tags "
@@ -66,34 +104,31 @@ class SyntheticReasoningPipeline:
             "Provide the complete architectural analysis, failure modes, and Kubernetes/Go/Terraform implementation."
         )
 
-        # Explicit Chain-of-Thought reasoning block
         thought_process = f"""1. Capacity & Bottleneck Sizing:
-- Target is {spec.target_rps:,} RPS. At 1KB payload per request, ingress bandwidth is ~{spec.target_rps * 1 / 1000:.1f} MB/s (~{spec.target_rps * 8 / 1000:.1f} Gbps).
-- A single PostgreSQL instance saturates at ~10,000 write RPS. Direct database writes will trigger connection pool starvation and cascading failure.
-- Solution: Decouple ingestion via partitioned Kafka/Redpanda topic with at-least-once delivery guarantees.
+- Target is {spec.target_rps:,} RPS. Ingress bandwidth is ~{spec.target_rps * 1 / 1000:.1f} MB/s (~{spec.target_rps * 8 / 1000:.1f} Gbps).
+- PostgreSQL direct writes saturate at ~10k RPS. Solution: Buffer with partitioned Kafka/Redpanda topic.
 
 2. Single Point of Failure (SPOF) Analysis:
-- Cache Stampede: If Redis cluster nodes fail or TTLs expire simultaneously, database will be inundated.
-- Solution: Probabilistic early expiration (XFetch algorithm) + Redis Cluster with multi-AZ read replicas.
-- Network Partitioning (CAP Theorem): Favor Availability and Partition Tolerance (AP) for non-financial metrics, CP with Raft consensus for stateful transactions.
+- Cache Stampede: Use probabilistic early expiration (XFetch algorithm) + Redis multi-AZ read replicas.
+- Raft consensus for stateful transactions; AP model for telemetry streams.
 
 3. Resilience & Graceful Degradation:
-- Implement client-side token bucket rate limiting + Envoy proxy adaptive concurrency limits.
-- Circuit breaker: Trip when 5xx error rate exceeds 5% over 10s sliding window; serve stale cache during trip.
-- Kubernetes HPA: Target 70% CPU utilization with PDB (PodDisruptionBudget) ensuring minAvailable=3 replicas."""
+- Envoy proxy adaptive concurrency limits + token bucket rate limiting.
+- Circuit breaker: Trip when 5xx error rate exceeds 5% over 10s sliding window."""
+
+        # Verify anti-rumination rules
+        is_clean, sanitized_thought = anti_rumination_filter(thought_process)
+        if not is_clean:
+            thought_process = sanitized_thought
 
         assistant_code_response = f"""### Architectural Implementation: {spec.service_name}
 
-#### 1. Resilient Go Backend with Circuit Breaking
 ```go
 package main
 
 import (
 	"context"
-	"errors"
-	"net/http"
 	"time"
-
 	"github.com/sony/gobreaker"
 )
 
@@ -102,81 +137,15 @@ type ResilientService struct {
 }
 
 func NewResilientService() *ResilientService {
-	settings := gobreaker.Settings{
-		Name:        "{spec.service_name}",
-		MaxRequests: 5,
-		Interval:    10 * time.Second,
-		Timeout:     5 * time.Second,
-		ReadyToTrip: func(counts gobreaker.Counts) bool {
-			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return counts.Requests >= 100 && failureRatio >= 0.05
-		},
+	return &ResilientService{
+		cb: gobreaker.NewCircuitBreaker(gobreaker.Settings{
+			Name:        "{spec.service_name}",
+			MaxRequests: 5,
+			Interval:    10 * time.Second,
+			Timeout:     5 * time.Second,
+		}),
 	}
-	return &ResilientService{cb: gobreaker.NewCircuitBreaker(settings)}
 }
-
-func (s *ResilientService) Execute(ctx context.Context, fn func() (any, error)) (any, error) {
-	return s.cb.Execute(func() (any, error) {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-			return fn()
-		}
-	})
-}
-```
-
-#### 2. Kubernetes High-Availability Deployment
-```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {spec.service_name.lower().replace(" ", "-")}
-  labels:
-    tier: backend
-spec:
-  replicas: 8
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 25%
-      maxUnavailable: 0
-  selector:
-    matchLabels:
-      app: {spec.service_name.lower().replace(" ", "-")}
-  template:
-    metadata:
-      labels:
-        app: {spec.service_name.lower().replace(" ", "-")}
-    spec:
-      affinity:
-        podAntiAffinity:
-          preferredDuringSchedulingIgnoredDuringExecution:
-            - weight: 100
-              podAffinityTerm:
-                labelSelector:
-                  matchExpressions:
-                    - key: app
-                      operator: In
-                      values: [{spec.service_name.lower().replace(" ", "-")}]
-                topologyKey: "topology.kubernetes.io/zone"
-      containers:
-        - name: server
-          image: internal-registry/{spec.service_name.lower()}:v1.2.0
-          resources:
-            requests:
-              cpu: "2"
-              memory: "4Gi"
-            limits:
-              cpu: "4"
-              memory: "8Gi"
-          readinessProbe:
-            httpGet:
-              path: /healthz
-              port: 8080
-            initialDelaySeconds: 5
-            periodSeconds: 3
 ```"""
 
         messages = [
@@ -200,13 +169,6 @@ spec:
     # Track 2: DSA & Algorithmic Optimization Track
     # ==========================================================================
     def build_dsa_sample(self, spec: DSASpec) -> ReasoningTrajectory:
-        """
-        Structures competitive programming problems into explicit reasoning phases:
-        (a) Constraints & edge-cases
-        (b) Brute-force failure analysis (TLE/MLE)
-        (c) Optimal data structure selection
-        (d) Mathematical Big-O proof
-        """
         system_prompt = (
             "You are an expert Competitive Programmer. Before providing any code, you must "
             "perform a strict 4-phase algorithmic analysis inside <think>...</think>:\n"
@@ -223,56 +185,44 @@ spec:
         )
 
         thought_process = f"""Phase 1: Constraints & Edge Cases:
-- Constraints: {', '.join(spec.constraints)}.
-- If N >= 10^5, any O(N^2) solution results in 10^10 operations, heavily exceeding the ~10^8 operations/sec budget.
-- Critical Edge Cases: {', '.join(spec.edge_cases)}.
+- Constraints: {', '.join(spec.constraints)}. N >= 10^5 mandates O(N) or O(N log N).
+- Edge Cases: {', '.join(spec.edge_cases)}.
 
 Phase 2: Brute-Force Failure Proof (TLE Analysis):
-- A naive nested loop or recursion takes {spec.brute_force_time}.
-- Under max input, operations count = 10^10 -> Time Limit Exceeded (TLE) guaranteed.
+- Naive algorithm takes {spec.brute_force_time}. Under N=10^5, 10^10 ops -> TLE.
 
 Phase 3: Optimal Invariant Selection:
-- To achieve {spec.target_time_complexity}, we maintain an invariant over sliding window / monotonic queue / prefix tree.
-- State Transition: We expand the right pointer, and shrink left pointer only when the invariant is violated.
+- Sliding window invariant with hash table frequency tracking yields {spec.target_time_complexity}.
 
 Phase 4: Big-O Complexity Proof:
-- Time: Each element is added at most once and removed at most once by pointers. Amortized 2 * N steps -> {spec.target_time_complexity}.
-- Space: Auxiliary hash table / deque stores at most distinct keys -> {spec.target_space_complexity}."""
+- Each element processed at most twice by two pointers: Amortized {spec.target_time_complexity}.
+- Auxiliary map stores at most K keys: {spec.target_space_complexity}."""
+
+        is_clean, sanitized_thought = anti_rumination_filter(thought_process)
+        if not is_clean:
+            thought_process = sanitized_thought
 
         code_solution = f"""```python
 from typing import List
 from collections import defaultdict
 
 def solve(arr: List[int], k: int) -> int:
-    \"\"\"
-    Solves {spec.problem_title} in {spec.target_time_complexity} time and {spec.target_space_complexity} space.
-    \"\"\"
+    \"\"\"Solves {spec.problem_title} in {spec.target_time_complexity} time.\"\"\"
     if not arr or k <= 0:
         return 0
-
-    left = 0
-    max_length = 0
+    left, max_length = 0, 0
     freq_map = defaultdict(int)
 
     for right in range(len(arr)):
         freq_map[arr[right]] += 1
-
-        # Maintain sliding window invariant
         while len(freq_map) > k:
             freq_map[arr[left]] -= 1
             if freq_map[arr[left]] == 0:
                 del freq_map[arr[left]]
             left += 1
-
         max_length = max(max_length, right - left + 1)
 
     return max_length
-
-# Unit Verification
-if __name__ == "__main__":
-    assert solve([1, 2, 1, 2, 3], 2) == 4
-    assert solve([], 1) == 0
-    print("All algorithmic unit tests passed successfully!")
 ```"""
 
         messages = [
@@ -293,113 +243,137 @@ if __name__ == "__main__":
         )
 
     # ==========================================================================
-    # Track 3: Multi-Turn Tool Calling & Debugging Track
+    # Track 3: Bayesian Hypothesis Localization & Surgical Debugging
     # ==========================================================================
     def build_tool_debugging_sample(self, spec: DebuggingAgentSpec) -> ReasoningTrajectory:
         """
-        Creates a multi-turn ReAct trajectory:
-        User -> Assistant (<think> -> <tool_call>) -> Environment (<tool_output>) ->
-        Assistant (<think> -> revised hypothesis -> patch).
+        Creates a Bayesian Root-Cause Localization trajectory:
+        1. Formulates ranked prior probabilities across architectural layers before touching tools.
+        2. Strictly uses surgical reads (line slices, not full file dumps).
+        3. Never dumps blind directory trees (`ls -R` is forbidden).
         """
         system_prompt = (
-            "You are an autonomous Software Debugging Agent with access to tools: bash, grep, "
-            "read_file, edit_file. Before invoking any tool, analyze hypotheses in <think>...</think>. "
-            "Inspect execution feedback inside <tool_output>...</tool_output> to correct bugs."
+            "You are a Surgical Senior Systems Engineer. When diagnosing cross-stack errors:\n"
+            "1. Formulate a ranked Bayesian probability hypothesis (<hypothesis>) of root causes before calling tools.\n"
+            "2. Never perform blind repository dumping or read entire files when inspecting code.\n"
+            "3. Use targeted line slices (e.g. read_file with start_line and end_line) to maintain high Context SNR.\n"
+            "4. Reason deliberately inside <think>...</think> without circular rumination."
         )
 
         user_content = (
-            f"Bug Report in repo '{spec.repo_name}':\n"
+            f"Cross-Stack Incident in '{spec.repo_name}':\n"
             f"{spec.bug_description}\n\n"
-            f"Traceback:\n```\n{spec.stack_trace}\n```\n"
-            "Diagnose the root cause, verify the failure, and produce a working fix."
+            f"Stack Trace:\n```\n{spec.stack_trace}\n```\n"
+            "Localize the root cause surgically and provide the minimal patch."
         )
 
-        # Turn 1: Initial hypothesis and grep invocation
-        turn1_thought = (
-            "The stack trace shows a RecursionError in `auth/token_validator.py` at line 42. "
-            "Hypothesis: Cyclic dependency or missing base case when verifying revoked JWT tokens. "
-            "Step 1: Inspect `auth/token_validator.py` around line 42 using read_file tool."
+        # 1. Structured Bayesian Hypothesis formulated BEFORE any tool call
+        bayes_hypo = BayesianHypothesis(
+            hypotheses=[
+                RankedHypothesisItem(
+                    id="H1",
+                    probability=0.65,
+                    suspect_layer="DB_SCHEMA_MIGRATION",
+                    rationale="Error 'KeyError: is_verified' during user authentication indicates user model was queried but column was not populated in SQL schema.",
+                    target_file="models/user.py",
+                    target_slice=[35, 55],
+                ),
+                RankedHypothesisItem(
+                    id="H2",
+                    probability=0.25,
+                    suspect_layer="API_SERIALIZER",
+                    rationale="Pydantic serializer in schemas/user.py may have 'is_verified' as mandatory without a default value.",
+                    target_file="schemas/user.py",
+                    target_slice=[15, 30],
+                ),
+                RankedHypothesisItem(
+                    id="H3",
+                    probability=0.10,
+                    suspect_layer="FRONTEND_STATE",
+                    rationale="React state in UserProfile.tsx might be accessing undefined property.",
+                    target_file="frontend/UserProfile.tsx",
+                ),
+            ],
+            falsification_plan="Test H1 first by reading models/user.py lines 35-55. If model contains is_verified, evaluate H2 serializer.",
         )
-        turn1_tool = ToolCall(name="read_file", arguments={"path": "auth/token_validator.py", "start_line": 35, "end_line": 55})
+
+        turn1_thought = (
+            "Given the cross-stack error, H1 has 65% prior probability. "
+            "Surgical Rule: Do not read the entire 600-line model file. "
+            "Inspect only lines 35 to 55 of models/user.py to check column definitions."
+        )
+        turn1_tool = ToolCall(name="read_file", arguments={"path": "models/user.py", "start_line": 35, "end_line": 55})
 
         turn1_output = ToolOutput(
             name="read_file",
-            output="""35: def validate_token_chain(token, visited=None):
-36:     if visited is None:
-37:         visited = set()
-38:     
-39:     parent_token = token.get_parent()
-40:     if parent_token:
-41:         # BUG: visited set was not updated before recursive call
-42:         return validate_token_chain(parent_token, visited)
-43:     return True""",
+            output="""35: class User(Base):
+36:     __tablename__ = "users"
+37:     id = Column(Integer, primary_key=True)
+38:     email = Column(String(255), unique=True, nullable=False)
+39:     # Note: is_verified was added to migration 004 but missing from SQLAlchemy model!
+40:     hashed_password = Column(String(255), nullable=False)""",
             exit_code=0,
         )
 
-        # Turn 2: Analyze tool output, invoke unit test to confirm bug
+        # Turn 2: Falsification verified H1 immediately on first hop
         turn2_thought = (
-            "Line 42 calls `validate_token_chain` recursively, but line 41 never added `token.id` "
-            "into `visited`. If a circular parent relationship exists, it triggers infinite recursion. "
-            "Let's run pytest using bash tool to confirm the failure."
+            "H1 confirmed on hop 1: Line 39 explicitly documents that `is_verified` was omitted "
+            "from the SQLAlchemy model attributes. The serializer expects this field, causing KeyError. "
+            "Next: Run pytest using bash tool on auth test suite to confirm the exact failure."
         )
-        turn2_tool = ToolCall(name="bash", arguments={"command": "pytest tests/test_auth.py -k test_circular_token"})
+        turn2_tool = ToolCall(name="bash", arguments={"command": "pytest tests/test_user_model.py -k test_user_serialization"})
 
         turn2_output = ToolOutput(
             name="bash",
-            output="FAILED tests/test_auth.py::test_circular_token - RecursionError: maximum recursion depth exceeded",
+            output="FAILED tests/test_user_model.py::test_user_serialization - KeyError: 'is_verified'",
             exit_code=1,
         )
 
-        # Turn 3: Fix bug and verify test passes
+        # Turn 3: Minimal surgical patch
         turn3_thought = (
-            "The test failure confirms the diagnosis. Fix: Add token.id to visited before "
-            "recursion; return False if token.id is already in visited. Let's output the final patch."
+            "Root cause verified. Solution: Add `is_verified = Column(Boolean, default=False, nullable=False)` "
+            "to models/user.py. High Signal-to-Noise Ratio preserved with only 1 surgical file slice read."
         )
 
-        final_response = f"""### Root Cause Analysis
-In `auth/token_validator.py`, the recursive function `validate_token_chain` did not register `token.id` into the `visited` set before recursing down the chain. When circular token hierarchies occur, this causes an infinite recursive loop culminating in a `RecursionError`.
+        final_response = """### Root Cause
+The SQLAlchemy `User` model (`models/user.py`) was missing the `is_verified` column attribute, which was present in DB migration `004` and required by the Pydantic API response schema.
 
-### Git Patch
+### Surgical Patch
 ```diff
---- a/auth/token_validator.py
-+++ b/auth/token_validator.py
-@@ -37,6 +37,9 @@ def validate_token_chain(token, visited=None):
-     if visited is None:
-         visited = set()
-     
-+    if token.id in visited:
-+        return False
-+    visited.add(token.id)
-+    
-     parent_token = token.get_parent()
-     if parent_token:
--        return validate_token_chain(parent_token, visited)
-+        return validate_token_chain(parent_token, visited)
-     return True
+--- a/models/user.py
++++ b/models/user.py
+@@ -37,5 +37,6 @@ class User(Base):
+     id = Column(Integer, primary_key=True)
+     email = Column(String(255), unique=True, nullable=False)
++    is_verified = Column(Boolean, default=False, nullable=False)
+     hashed_password = Column(String(255), nullable=False)
 ```"""
+
+        # Verify anti-rumination on each thought step
+        _, clean_turn1 = anti_rumination_filter(turn1_thought)
+        _, clean_turn2 = anti_rumination_filter(turn2_thought)
+        _, clean_turn3 = anti_rumination_filter(turn3_thought)
 
         messages = [
             ChatMessage(role=RoleEnum.USER, content=user_content),
-            ChatMessage(role=RoleEnum.ASSISTANT, content="", thought=turn1_thought, tool_calls=[turn1_tool]),
+            ChatMessage(role=RoleEnum.ASSISTANT, content="", thought=clean_turn1, hypothesis=bayes_hypo, tool_calls=[turn1_tool]),
             ChatMessage(role=RoleEnum.TOOL, content="", tool_outputs=[turn1_output]),
-            ChatMessage(role=RoleEnum.ASSISTANT, content="", thought=turn2_thought, tool_calls=[turn2_tool]),
+            ChatMessage(role=RoleEnum.ASSISTANT, content="", thought=clean_turn2, tool_calls=[turn2_tool]),
             ChatMessage(role=RoleEnum.TOOL, content="", tool_outputs=[turn2_output]),
-            ChatMessage(role=RoleEnum.ASSISTANT, content=final_response, thought=turn3_thought),
+            ChatMessage(role=RoleEnum.ASSISTANT, content=final_response, thought=clean_turn3),
         ]
 
         return ReasoningTrajectory(
-            trajectory_id=f"debug_{spec.repo_name}",
+            trajectory_id=f"surgical_debug_{spec.repo_name}",
             track=TrackEnum.MULTI_TURN_DEBUGGING,
             system_prompt=system_prompt,
             messages=messages,
-            metadata={"tool_count": 2},
+            metadata={"localization_hops": 1, "prior_h1_probability": 0.65},
         )
 
     def generate_all_tracks_to_jsonl(self, output_file: str):
-        """Generates representative samples across all 3 tracks and saves to disk."""
         logger.info(f"Generating synthetic reasoning dataset to: {output_file}")
 
-        # Spec 1: System Design
         sys_spec = SystemDesignSpec(
             service_name="Global Telemetry Ingestion Service",
             target_rps=500000,
@@ -409,24 +383,22 @@ In `auth/token_validator.py`, the recursive function `validate_token_chain` did 
             compute_infrastructure="Kubernetes with Envoy Service Mesh",
         )
 
-        # Spec 2: DSA
         dsa_spec = DSASpec(
             problem_title="Longest Substring with At Most K Distinct Characters",
-            problem_statement="Given a string s and an integer k, return the length of the longest substring of s that contains at most k distinct characters.",
+            problem_statement="Given a string s and an integer k, return the length of the longest substring containing at most k distinct characters.",
             constraints=["1 <= s.length <= 10^5", "0 <= k <= 50"],
-            brute_force_time="O(N^2) or O(N^3)",
+            brute_force_time="O(N^2)",
             target_time_complexity="O(N)",
             target_space_complexity="O(K)",
-            edge_cases=["k=0", "k >= unique characters in s", "s contains repeated characters"],
+            edge_cases=["k=0", "k >= unique characters in s"],
         )
 
-        # Spec 3: Debugging ReAct
         debug_spec = DebuggingAgentSpec(
-            repo_name="core-auth-gateway",
-            bug_description="Infinite recursion crashes worker process during cyclical token exchange.",
-            stack_trace="File 'auth/token_validator.py', line 42, in validate_token_chain\nRecursionError: maximum recursion depth exceeded",
+            repo_name="core-user-service",
+            bug_description="Frontend 500 error on profile fetch due to unmarshalled user attribute.",
+            stack_trace="File 'services/user.py', line 62, in get_profile\nKeyError: 'is_verified'",
             available_tools=["bash", "read_file", "edit_file", "grep"],
-            expected_patch="Cycle detection in visited set",
+            expected_patch="Add is_verified column to models/user.py",
         )
 
         samples = [
@@ -439,7 +411,7 @@ In `auth/token_validator.py`, the recursive function `validate_token_chain` did 
             for sample in samples:
                 f.write(json.dumps(sample.to_chatml_json(), ensure_ascii=False) + "\n")
 
-        logger.info(f"Successfully serialized {len(samples)} synthetic reasoning trajectories.")
+        logger.info(f"Successfully generated {len(samples)} surgical reasoning trajectories -> {output_file}")
 
 
 if __name__ == "__main__":
