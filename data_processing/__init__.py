@@ -9,6 +9,13 @@ from .git_diff_pipeline import (
     apply_search_replace_patch,
     format_commit_pr_training_sample,
 )
+from .dataset_mixer import (
+    DomainCategory,
+    DomainConfig,
+    MixingScheduleConfig,
+    CalibratedDomainFilter,
+    MultiDomainDatasetMixer,
+)
 
 __all__ = [
     "validate_code_syntax",
@@ -21,4 +28,10 @@ __all__ = [
     "parse_search_replace_blocks",
     "apply_search_replace_patch",
     "format_commit_pr_training_sample",
+    "DomainCategory",
+    "DomainConfig",
+    "MixingScheduleConfig",
+    "CalibratedDomainFilter",
+    "MultiDomainDatasetMixer",
 ]
+

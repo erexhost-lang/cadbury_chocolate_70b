@@ -8,6 +8,12 @@ from .moe_mla_architecture import (
     CadburyMoEBlock,
     Cadbury70BMoEModel,
 )
+from .moe_routing_config import (
+    MoERoutingConfig,
+    DynamicRouterBiasScheduler,
+    AuxiliaryLossFreeRouterController,
+    RoutingTelemetry,
+)
 
 __all__ = [
     "MLAConfig",
@@ -17,4 +23,9 @@ __all__ = [
     "SparseMoELayer",
     "CadburyMoEBlock",
     "Cadbury70BMoEModel",
+    "MoERoutingConfig",
+    "DynamicRouterBiasScheduler",
+    "AuxiliaryLossFreeRouterController",
+    "RoutingTelemetry",
 ]
+

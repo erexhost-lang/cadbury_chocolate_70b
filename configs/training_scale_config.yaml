@@ -1,0 +1,92 @@
+# ==============================================================================
+# Cadbury-Chocolate 70B: Pre-Training Data Scale & Multi-Domain Mixing Ratio
+# ==============================================================================
+# Target: 3.0 Trillion to 5.5 Trillion Tokens across Google Cloud TPU Pod Slices
+# Architecture: 70B Sparse MoE (16 Routed + 2 Shared Experts, Top-2 Active) + MLA
+# ==============================================================================
+
+scaling_laws:
+  total_model_parameters: 70550000000       # 70.55 Billion total parameters
+  active_parameters_per_token: 14100000000  # ~14.10 Billion active parameters per token
+  chinchilla_ratio: 20                      # 20 tokens per active parameter
+  routing_diversity_multiplier: 14.18       # Multiplier to guarantee expert specialization
+  
+  # Token Volume Schedule (3.0T to 5.5T Tokens)
+  target_token_volume: 4000000000000        # 4.0 Trillion tokens (Baseline Schedule)
+  min_token_volume: 3000000000000           # 3.0 Trillion tokens (Minimum Convergence)
+  max_token_volume: 5500000000000           # 5.5 Trillion tokens (Full Saturation)
+
+  # Chinchilla MoE Mathematical Rationale:
+  # 1. In standard dense models, Chinchilla compute-optimality requires D = 20 * N.
+  # 2. In Sparse MoE, each token only activates ~14.1B parameters (2 shared + 2 routed).
+  # 3. If trained on naive active tokens (14.1B * 20 = 282B tokens), each routed expert
+  #    would only see (282B * 2 / 16) = ~35B tokens, leading to catastrophic expert starvation.
+  # 4. By applying the Routing Diversity Multiplier M_routing = 14.18, total volume reaches 4.0T:
+  #    Average tokens per routed expert = (4.0T * 2 / 16) = 500 Billion tokens per expert!
+  # 5. This allows the router to cleanly separate domain representations without expert collapse.
+
+# ==============================================================================
+# Multi-Domain Data Mixing Distribution (60% Code / 40% Reasoning Prose)
+# ==============================================================================
+data_mixing:
+  enforce_code_range: [0.50, 0.70]          # Code must remain between 50% and 70%
+  enforce_text_range: [0.30, 0.50]          # Natural language must remain between 30% and 50%
+
+  # --- Domain Breakdown ---
+  domains:
+    # 1. Pure Code Distribution (Target: 60.0%)
+    multilang_github_repos:
+      ratio: 0.40                           # 40.0% (1.60 Trillion tokens)
+      description: "Permissively licensed source code across 30+ programming languages (The Stack v2)"
+      languages_count: 35
+      dedup_jaccard_threshold: 0.85
+      fim_rate: 0.50
+
+    git_diff_pr_evolution:
+      ratio: 0.10                           # 10.0% (400 Billion tokens)
+      description: "GitHub commit histories, pull requests, and SEARCH/REPLACE refactoring hunks"
+      dedup_jaccard_threshold: 0.80
+      fim_rate: 0.20
+
+    technical_docs_apis:
+      ratio: 0.05                           # 5.0% (200 Billion tokens)
+      description: "Official language specifications, framework docs, RFCs, and API schemas"
+      dedup_jaccard_threshold: 0.80
+      fim_rate: 0.30
+
+    code_qa_discussions:
+      ratio: 0.05                           # 5.0% (200 Billion tokens)
+      description: "Stack Overflow QA pairs, GitHub issues, and code review threads"
+      dedup_jaccard_threshold: 0.78
+      fim_rate: 0.10
+
+    # 2. High-Quality Natural Language & Formal Logic (Target: 40.0%)
+    stem_math_formal_logic:
+      ratio: 0.15                           # 15.0% (600 Billion tokens)
+      description: "ArXiv math/physics papers, Lean4/Isabelle proofs, and competition mathematics"
+      dedup_jaccard_threshold: 0.75
+      fim_rate: 0.0
+
+    cs_textbooks_academic:
+      ratio: 0.15                           # 15.0% (600 Billion tokens)
+      description: "Peer-reviewed CS textbooks, algorithms, distributed systems, and OS design"
+      dedup_jaccard_threshold: 0.75
+      fim_rate: 0.0
+
+    curated_tech_web:
+      ratio: 0.10                           # 10.0% (400 Billion tokens)
+      description: "FineWeb-Edu technical crawls, engineering post-mortems, and architecture blogs"
+      dedup_jaccard_threshold: 0.72
+      fim_rate: 0.0
+
+# ==============================================================================
+# MoE Domain-to-Expert Specialization Target Mapping
+# ==============================================================================
+moe_specialization_map:
+  routed_experts:
+    low_level_systems: [0, 1, 2, 3]         # C, C++, Rust, Go, Assembly, OS, Concurrency
+    application_infrastructure: [4, 5, 6, 7] # Python, TypeScript, Java, SQL, APIs, Cloud
+    formal_logic_and_math: [8, 9, 10, 11]   # DSA, Math proofs, Algorithmic complexity, Big-O
+    architecture_and_diffs: [12, 13, 14, 15] # System design, PR evolution, Refactoring
+  shared_experts:
+    universal_syntax: [0, 1]                # Common language grammar, token representation

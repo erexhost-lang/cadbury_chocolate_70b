@@ -3,6 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Architecture: MoE+MLA](https://img.shields.io/badge/Architecture-Sparse%20MoE%20%2B%20MLA-blue.svg)](model/moe_mla_architecture.py)
 [![Context: 128k](https://img.shields.io/badge/Context%20Window-128k%20Tokens-purple.svg)](configs/model_70b_config.yaml)
+[![Tokens: 3.0T-5.5T](https://img.shields.io/badge/Pretraining%20Scale-3.0T%20--%205.5T%20Tokens-red.svg)](configs/training_scale_config.yaml)
 [![Hardware: TPU Pods](https://img.shields.io/badge/Google%20Cloud-TPU%20v5p%20%2F%20v6e-green.svg)](configs/tpu_v5p_mesh_config.yaml)
 [![Framework: PyTorch FSDP & DeepSpeed](https://img.shields.io/badge/Distributed-FSDP%20%2F%20DeepSpeed%20ZeRO--3-orange.svg)](configs/fsdp_config.yaml)
 [![RLVR: GRPO](https://img.shields.io/badge/Post--Training-GRPO%20%2B%20Verifiable%20Step%20PRMs-green.svg)](training/rl_grpo_verifier.py)
@@ -19,6 +20,11 @@ Modeled after frontier engineering breakthroughs: **DeepSeek-V3 / DeepSeek-Coder
 - [🏛️ Model Specifications & Mathematics](#️-model-specifications--mathematics)
 - [💾 Multi-Head Latent Attention (MLA) & KV Cache Math](#-multi-head-latent-attention-mla--kv-cache-math)
 - [⚖️ Auxiliary-Loss-Free Dynamic Load Balancing](#️-auxiliary-loss-free-dynamic-load-balancing)
+- [📊 Pre-Training Data Strategy & MoE Scaling Laws (3.0T – 5.5T Tokens)](#-pre-training-data-strategy--moe-scaling-laws-30t--55t-tokens)
+  - [1. Chinchilla MoE Scaling & The Active Parameter Principle](#1-chinchilla-moe-scaling--the-active-parameter-principle)
+  - [2. Multi-Domain Data Mixing Ratios (60% Code / 40% Reasoning Prose)](#2-multi-domain-data-mixing-ratios-60-code--40-reasoning-prose)
+  - [3. Preventing Expert Starvation via 16-Expert Domain Segmentation](#3-preventing-expert-starvation-via-16-expert-domain-segmentation)
+  - [4. Dynamic Bias Decay Schedule ($\gamma(t)$) Across 4 Trillion Tokens](#4-dynamic-bias-decay-schedule-gammat-across-4-trillion-tokens)
 - [🖥️ Hardware Requirements & Feasibility Matrix](#️-hardware-requirements--feasibility-matrix)
 - [☁️ Google Cloud TPU Pod Deployment Guide (v5e / v5p / v6e Trillium)](#️-google-cloud-tpu-pod-deployment-guide-v5e--v5p--v6e-trillium)
   - [1. 3D SPMD / Pjit Mesh Sharding Architecture](#1-3d-spmd--pjit-mesh-sharding-architecture)
@@ -46,7 +52,7 @@ Modeled after frontier engineering breakthroughs: **DeepSeek-V3 / DeepSeek-Coder
 ```mermaid
 flowchart TD
     subgraph Stage1["Stage 1: Multi-Source Pretraining (CPT) & Sparse MoE"]
-        A1["Raw Code Streams\n(The Stack v2, GitHub)"] --> A2["AST Import Parsing &\nTopological Repo DAG"]
+        A1["Multi-Domain Streams (3.0T - 5.5T Tokens)\n(60% Code / 40% Reasoning Prose)"] --> A2["AST Import Parsing &\nTopological Repo DAG"]
         A2 --> A3["Fill-In-The-Middle (FIM)\n(50% PSM / SPM)"]
         A3 --> A4["Zero-Waste Sequence Packing\n(128k Context Tokens)"]
         A4 --> A5["DeepSeek-V3 Sparse MoE + MLA\n(16 Routed + 2 Shared Experts, Top-2 Active)\n(Auxiliary-Loss-Free Dynamic Bias)"]
@@ -99,7 +105,8 @@ flowchart TD
 | **Decoupled RoPE Dim ($d_R$)** | **64** | Position keys decoupled from KV cache, avoiding cache expansion |
 | **Number of Heads** | **64** | Attention heads (head dimension = 128) |
 | **Expert Intermediate Size** | **4,096** | Fine-grained expert width for specialized algorithmic/domain routing |
-| **Load Balancing Mechanism** | **Auxiliary-Loss-Free** | Dynamic expert bias $b_i \leftarrow b_i - \gamma \text{sign}(\text{load}_i - \bar{\text{load}})$ |
+| **Load Balancing Mechanism** | **Auxiliary-Loss-Free** | Dynamic expert bias $b_i \leftarrow b_i - \gamma(t) \text{sign}(\text{load}_i - \bar{\text{load}})$ |
+| **Pre-Training Token Target** | **4.0 Trillion Tokens** | Range: **3.0T to 5.5T tokens** scaled to active parameter density |
 | **Context Window** | **131,072 tokens (128k)** | Full repository context enabled by MLA KV cache compression |
 | **Vocabulary Size** | **128,270** | Byte-Level BPE with specialized `<think>`, `<hypothesis>`, `<tool_call>`, FIM tags |
 | **Position Embeddings** | **RoPE ($\theta = 500,000$)** | High base frequency for long-context extrapolation |
@@ -130,8 +137,112 @@ Cadbury-70B Frontier V2 implements **Auxiliary-Loss-Free Balancing**:
 1. Token routing logits are computed as:
    $$s_{i,t} = \text{Top2}\left( \text{Softmax}\left( W_r \cdot x_t + b_i \right) \right)$$
 2. An autonomous dynamic bias vector $b_i$ is maintained and updated after each forward pass without gradient backpropagation:
-   $$b_i \leftarrow b_i - \gamma \cdot \text{sign}\left( \text{load}_i - \bar{\text{load}} \right)$$
+   $$b_i \leftarrow b_i - \gamma(t) \cdot \text{sign}\left( \text{load}_i - \bar{\text{load}} \right)$$
 3. If expert $i$ is overloaded ($\text{load}_i > \bar{\text{load}}$), its bias is decremented, gently shifting boundary tokens to under-utilized experts without perturbing the model's language gradients.
+
+---
+
+## 📊 Pre-Training Data Strategy & MoE Scaling Laws (3.0T – 5.5T Tokens)
+
+Pre-training an enterprise-grade Mixture-of-Experts coding model requires rethinking classical Chinchilla scaling laws. Naive dense scaling results either in severe under-training of expert sub-networks or massive compute inefficiency.
+
+---
+
+### 1. Chinchilla MoE Scaling & The Active Parameter Principle
+
+Under classical Chinchilla scaling ($D \approx 20 \times N$), a dense 70B model requires $\approx 1.4\text{ Trillion tokens}$. In Cadbury-70B's Sparse MoE:
+- **Total Parameters:** $N_{\text{total}} = 70.55\text{B}$
+- **Active Parameters Per Token:** $N_{\text{active}} \approx 14.1\text{B}$ (2 shared experts + 2 activated routed experts)
+
+#### The MoE Scaling Paradox:
+1. **The Naive Active Flaw:** If we trained solely on active parameter Chinchilla optimality ($20 \times 14.1\text{B} = 282\text{B tokens}$), each of the 16 routed experts would only be activated by $(282\text{B} \times 2) / 16 \approx \mathbf{35.25\text{ Billion tokens}}$. This severely under-trains expert weights, leading to high validation perplexity and failure to memorize language syntax.
+2. **The Routing Imbalance Flaw:** The MoE router requires high data diversity across varied problem domains to stabilize clean cluster boundaries. Without enough data volume, the router collapses into uniform mediocrity or starves niche domain experts (e.g., low-level systems assembly or formal math proofs).
+
+#### The MoE-Adjusted Scaling Law:
+To ensure each routed expert reaches true Chinchilla convergence ($> 400\text{B}$ specialized tokens per expert), we introduce the **Routing Diversity Multiplier ($M_{\text{routing}} = 14.18$)**:
+$$D_{\text{MoE}} = N_{\text{active}} \times 20 \times M_{\text{routing}} = 14.1\text{B} \times 20 \times 14.18 \approx \mathbf{4.0\text{ Trillion Tokens}}$$
+$$\text{Production Pre-Training Schedule: } \mathbf{3.0\text{ Trillion to } 5.5\text{ Trillion Tokens}}$$
+
+At 4.0 Trillion tokens, each of the 16 routed experts receives on average:
+$$\text{Tokens per Routed Expert} = \frac{4.0\text{T} \times \text{top\_k}}{N_{\text{routed}}} = \frac{4.0\text{T} \times 2}{16} = \mathbf{500\text{ Billion Tokens}}$$
+This achieves full parameter saturation while maintaining an inference cost equivalent to a 14B model!
+
+---
+
+### 2. Multi-Domain Data Mixing Ratios (60% Code / 40% Reasoning Prose)
+
+Cadbury-70B enforces a strictly balanced **60/40 Code-to-Reasoning split** via [`data_processing/dataset_mixer.py`](data_processing/dataset_mixer.py) and [`configs/training_scale_config.yaml`](configs/training_scale_config.yaml):
+
+| Category | Domain Stream | Target Ratio | Tokens (at 4.0T Target) | Calibrated MinHash Threshold | FIM Rate | Primary Purpose |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Pure Code (60%)** | `multilang_github_repos` | **40.0%** | $1.60\text{ Trillion}$ | $0.85$ Jaccard | $50\%$ | Multi-language syntax (30+ languages, The Stack v2) |
+| | `git_diff_pr_evolution` | **10.0%** | $400\text{ Billion}$ | $0.80$ Jaccard | $20\%$ | Commit history, PR evolution & `SEARCH/REPLACE` hunks |
+| | `technical_docs_apis` | **5.0%** | $200\text{ Billion}$ | $0.80$ Jaccard | $30\%$ | Official SDK specifications, RFCs, OpenAPI schemas |
+| | `code_qa_discussions` | **5.0%** | $200\text{ Billion}$ | $0.78$ Jaccard | $10\%$ | Stack Overflow QA, GitHub issues, code reviews |
+| **Reasoning Prose (40%)** | `stem_math_formal_logic` | **15.0%** | $600\text{ Billion}$ | $0.75$ Jaccard | $0\%$ | ArXiv papers, Lean4/Isabelle formal proofs, math |
+| | `cs_textbooks_academic` | **15.0%** | $600\text{ Billion}$ | $0.75$ Jaccard | $0\%$ | Algorithms, Distributed Systems, Compilers literature |
+| | `curated_tech_web` | **10.0%** | $400\text{ Billion}$ | $0.72$ Jaccard | $0\%$ | FineWeb-Edu technical articles, post-mortems |
+
+---
+
+### 3. Preventing Expert Starvation via 16-Expert Domain Segmentation
+
+Why is 40% natural language prose essential for a code LLM? 
+Training on 100% pure code causes the **"Syntax Idiot-Savant"** failure mode—where a model can write syntax but cannot reason through system design tradeoffs, algorithmic proofs, or concurrency race conditions.
+
+By feeding a 60/40 code/reasoning split into 16 routed experts, the model naturally partitions into **4 specialized expert clusters**:
+
+```mermaid
+graph TD
+    subgraph Shared["Always-Active Shared Experts (Universal Foundation)"]
+        S0["Shared Expert 0: Universal Syntax & Byte Grammar"]
+        S1["Shared Expert 1: Natural Language Logic & Common Patterns"]
+    end
+
+    subgraph Routed["16 Specialized Routed Experts (Top-2 Activated per Token)"]
+        subgraph Cluster1["Experts 0 - 3: Low-Level Systems"]
+            E0["E0: C / C++ / Pointer Arithmetic"]
+            E1["E1: Rust Ownership & Concurrency"]
+            E2["E2: Go Goroutines & Runtime"]
+            E3["E3: Assembly, Kernels & Drivers"]
+        end
+        subgraph Cluster2["Experts 4 - 7: Application & Infrastructure"]
+            E4["E4: Python Backend & AsyncIO"]
+            E5["E5: TypeScript / Modern Web"]
+            E6["E6: Java / Enterprise Architectures"]
+            E7["E7: SQL, Schemas & Distributed DBs"]
+        end
+        subgraph Cluster3["Experts 8 - 11: Algorithmic Logic & Mathematics"]
+            E8["E8: Data Structures & Dynamic Prog."]
+            E9["E9: Graph Theory & Combinatorics"]
+            E10["E10: Formal Proofs (Lean4/Logic)"]
+            E11["E11: Big-O Bounds & Complexity"]
+        end
+        subgraph Cluster4["Experts 12 - 15: Architecture & Software Evolution"]
+            E12["E12: System Design & Microservices"]
+            E13["E13: Git Diffs & PR Refactoring"]
+            E14["E14: API Protocols (gRPC/REST)"]
+            E15["E15: Bug Localization & LSP Tools"]
+        end
+    end
+```
+
+---
+
+### 4. Dynamic Bias Decay Schedule ($\gamma(t)$) Across 4 Trillion Tokens
+
+To ensure the router breaks symmetry early without oscillating late in training, the dynamic bias learning rate $\gamma(t)$ follows a cosine decay schedule ([`model/moe_routing_config.py`](model/moe_routing_config.py)):
+
+$$\gamma(t) = \gamma_{\text{min}} + \frac{1}{2}(\gamma_0 - \gamma_{\text{min}})\left(1 + \cos\left(\pi \frac{t - t_{\text{warmup}}}{T - t_{\text{warmup}}}\right)\right)$$
+
+| Token Milestone | Training Stage | $\gamma(t)$ Value | Router Behavior | Target Load CV ($\sigma / \mu$) |
+| :--- | :--- | :--- | :--- | :--- |
+| **$0 \rightarrow 100\text{ Billion}$** | Warmup Phase | $\mathbf{0.0050}$ | High exploration to break expert symmetry | $CV \le 0.25$ |
+| **$500\text{ Billion}$** | Early Specialization | $\mathbf{0.0044}$ | Cluster boundaries begin to emerge | $CV \le 0.18$ |
+| **$1.0\text{ Trillion}$** | Core Pre-Training | $\mathbf{0.0036}$ | Experts separate into 4 domain clusters | $CV \le 0.14$ |
+| **$2.0\text{ Trillion}$** | Mid-Point Saturation | $\mathbf{0.0026}$ | Domain specialization fully established | $CV \le 0.12$ |
+| **$3.0\text{ Trillion}$** | Convergence Threshold | $\mathbf{0.0016}$ | High balance across all 16 experts | $CV \le 0.10$ |
+| **$4.0\text{ Trillion}$** | Target Saturation | $\mathbf{0.0002}$ | Fine micro-adjustments with 0 routing jitter | $CV \le 0.08$ |
 
 ---
 
@@ -158,7 +269,7 @@ graph LR
 | **Tier 1: Single GPU**<br>1x A100 / H100 (80GB)<br>*(or 1x RTX 6000 Ada 48GB)* | PCIe 4.0 / 5.0 | • 4-bit QLoRA SFT<br>• Synthetic Data Generation<br>• Entropy-Gated Inference Router | $\approx 45\text{--}55\text{ GB}$ total VRAM | `training/train_qlora.py` with BitsAndBytes NF4 + Paged AdamW |
 | **Tier 2: Single Node**<br>8x A100 / H100 (80GB) | NVLink<br>(600–900 GB/s) | • Full-Parameter SFT (bf16)<br>• GRPO Reinforcement Learning<br>• Sequence Packing up to 32k | $\approx 35\text{--}55\text{ GB}$ per GPU | `training/sft_reasoning_trainer.py` & `training/rl_grpo_verifier.py` with FSDP |
 | **Tier 3: Multi-Node Cluster**<br>4–8 Nodes (32–64x H100 80GB) | InfiniBand NDR/HDR<br>(200–400 Gbps) | • Full Pretraining (CPT) from scratch<br>• Full SFT with 128k Context<br>• Multi-node GRPO Policy Optimization | $\approx 26.5\text{ GB}$ static + activations | `training/launch_slurm.sh` or `torchrun` with PyTorch FSDP FULL_SHARD |
-| **Tier 4: Google Cloud TPU Pod**<br>32x to 128x TPU v5p / v6e | 3D Torus ICI<br>(4,800 Gbps) | • Full 70B MoE Pretraining (CPT)<br>• 128k Context Serving with OpenXLA<br>• FP8 Cloud Distributed Checkpointing | 95 GB HBM per chip<br>($3,040\text{ GB}$ aggregate) | `hardware/tpu_optimization.py` & `inference/tpu_inference.py` with XLA SPMD |
+| **Tier 4: Google Cloud TPU Pod**<br>32x to 128x TPU v5p / v6e | 3D Torus ICI<br>(4,800 Gbps) | • Full 70B MoE Pretraining (3.0T-5.5T)<br>• 128k Context Serving with OpenXLA<br>• FP8 Cloud Distributed Checkpointing | 95 GB HBM per chip<br>($3,040\text{ GB}$ aggregate) | `hardware/tpu_optimization.py` & `inference/tpu_inference.py` with XLA SPMD |
 
 ---
 
@@ -285,9 +396,6 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 # Install repository dependencies
 pip install -r requirements.txt
 
-# For TPU Pod deployments, install PyTorch/XLA:
-# pip install torch-xla[tpu] -f https://storage.googleapis.com/libtpu-releases/index.html
-
 # Compile FlashAttention-2 (For NVIDIA GPU clusters)
 pip install flash-attn --no-build-isolation
 ```
@@ -322,13 +430,11 @@ export PYTHONUNBUFFERED=1
 
 ## 🚀 Step-by-Step Training Guide
 
-Follow these sequential phases to train Cadbury-70B from raw data to an aligned frontier reasoning agent.
+Follow these sequential phases to train Cadbury-70B across the 3.0T to 5.5T token schedule.
 
 ---
 
 ### Phase 1: Data Collection, Ingestion & Tokenizer Training
-
-Before training, prepare raw code repositories, deduplicate tokens, and train the specialized Byte-Level BPE tokenizer.
 
 #### 1. Ingest Raw Code via Streaming (Zero Disk Waste)
 Fetch and stream raw multi-language datasets directly from Hugging Face:
@@ -339,18 +445,10 @@ python data_collection/stream_hf_code.py \
     --max-samples 500000
 ```
 
-#### 2. Clean, Scrub Secrets & Deduplicate
-Run AST validation, scrub API tokens/cryptographic keys, and apply MinHash near-deduplication ($0.85$ Jaccard threshold):
+#### 2. Execute Multi-Domain Dataset Mixer (60% Code / 40% Reasoning)
+Run the calibrated dataset mixer to assemble the 4.0T token pre-training mixture:
 ```bash
-# Syntax and PII scrubbing
-python data_processing/secret_scrubber.py \
-    --input-file "data/raw/the_stack/samples.jsonl" \
-    --output-file "data/processed/clean_samples.jsonl"
-
-# MinHash LSH deduplication
-python data_processing/minhash_dedup.py \
-    --input-file "data/processed/clean_samples.jsonl" \
-    --output-file "data/processed/deduped_samples.jsonl"
+python data_processing/dataset_mixer.py
 ```
 
 #### 3. Train Byte-Level BPE Tokenizer
@@ -383,13 +481,7 @@ Submit the production job script [`training/launch_slurm.sh`](training/launch_sl
 sbatch training/launch_slurm.sh
 ```
 
-Inspect live training logs:
-```bash
-tail -f logs/cadbury_70b_*.out
-```
-
 #### Option 2: Launch via Bare-Metal `torchrun` across 4 Nodes (GPUs)
-Execute on Node 0 (Master Node `10.0.0.1`):
 ```bash
 torchrun \
     --nnodes=4 \
@@ -434,8 +526,6 @@ python data_processing/git_diff_pipeline.py \
 
 ### Phase 4: Supervised Fine-Tuning (SFT)
 
-Choose your training route depending on your hardware availability:
-
 #### Option A: Full Multi-Node Cluster SFT (4 Nodes $\times$ 8 GPUs)
 Uses Completion-Only Masking, NEFTune embedding noise ($\alpha = 5.0$), and full 128k context:
 ```bash
@@ -475,9 +565,8 @@ python training/train_qlora.py \
 
 ### Phase 5: Reinforcement Learning via GRPO (RLVR)
 
-Post-SFT alignment uses **Group Relative Policy Optimization (GRPO)** with **Deterministic Verifiable Step Rewards** (no unstable neural PRMs):
+Post-SFT alignment uses **Group Relative Policy Optimization (GRPO)** with **Deterministic Verifiable Step Rewards**:
 
-Launch on an 8-GPU node:
 ```bash
 torchrun --nproc_per_node=8 training/rl_grpo_verifier.py \
     --model-path "checkpoints/cadbury-70b-sft" \
@@ -501,40 +590,10 @@ During training, candidate rollouts are evaluated against 6 deterministic verifi
 
 ### Phase 6: Inference & Confidence-Gated Test-Time Compute
 
-Deploy the model with the **Confidence-Gated Best-of-N Sandbox Router** to achieve fast decoding on simple queries and deep verification on complex queries:
+Deploy the model with the **Confidence-Gated Best-of-N Sandbox Router**:
 
 ```bash
 python inference/test_time_router.py
-```
-
-#### Python API Usage:
-```python
-from inference.test_time_router import EntropyGatedTestTimeRouter
-
-router = EntropyGatedTestTimeRouter(
-    entropy_threshold=0.55,  # Threshold separating fast vs best-of-N paths
-    num_candidates=4,         # Parallel rollouts when entropy is high
-    sandbox_timeout_sec=4.0,  # Execution timeout
-)
-
-prompt = "Fix the race condition in this token-bucket rate limiter."
-unit_tests = """
-limiter = TokenBucket(capacity=2, refill_rate=10.0)
-assert limiter.consume(1) is True
-assert limiter.consume(1) is True
-assert limiter.consume(1) is False
-"""
-
-# The router inspects reasoning entropy and dynamically allocates test-time compute
-best_result, metadata, all_candidates = router.route_and_generate(
-    prompt=prompt,
-    unit_tests=unit_tests,
-    model=model,
-    tokenizer=tokenizer,
-)
-
-print(f"Routing Decision: {metadata.decision.value}")  # 'fast_single_pass' or 'parallel_best_of_n'
-print(f"Winning Code:\n{best_result.extracted_code}")
 ```
 
 ---
@@ -572,6 +631,7 @@ Ensure firewall ports between nodes are open on port range `29500-29550`.
 cadbury-chocolate/
 ├── configs/
 │   ├── model_70b_config.yaml     # 70B MoE (16 routed, 2 shared) + MLA (d_c=512, d_R=64) + TPU & 128k context
+│   ├── training_scale_config.yaml # 3.0T-5.5T token schedule, MoE scaling laws & 60/40 data mixing ratios
 │   ├── tpu_v5p_mesh_config.yaml  # Google Cloud TPU v5p/v6e 3D Torus mesh sharding config
 │   ├── fsdp_config.yaml          # PyTorch FSDP FULL_SHARD cluster setup
 │   ├── deepspeed_zero3.json      # DeepSpeed ZeRO-3 offload configuration
@@ -581,6 +641,7 @@ cadbury-chocolate/
 │   ├── github_crawler.py         # Multi-language Git repository harvester
 │   └── fim_formatter.py          # Fill-In-The-Middle (PSM/SPM) transformations
 ├── data_processing/
+│   ├── dataset_mixer.py          # Multi-domain weighted sampler (60% code / 40% reasoning)
 │   ├── syntax_validator.py       # AST-based syntax checking (Python, JS, C, Rust)
 │   ├── secret_scrubber.py        # PII, API tokens, and cryptographic key sanitizer
 │   ├── minhash_dedup.py          # MinHash LSH near-deduplication (Jaccard similarity)
@@ -601,7 +662,8 @@ cadbury-chocolate/
 │   └── tpu_inference.py          # High-throughput TPU serving engine with persistent XLA cache
 ├── model/
 │   ├── __init__.py               # Model exports (MLA, MoE, Router, Cadbury70BMoEModel)
-│   └── moe_mla_architecture.py   # Multi-Head Latent Attention & Sparse MoE PyTorch modules
+│   ├── moe_mla_architecture.py   # Multi-Head Latent Attention & Sparse MoE PyTorch modules
+│   └── moe_routing_config.py     # Auxiliary-Loss-Free router scheduler across 3T-5.5T tokens
 ├── tokenization/
 │   ├── train_code_tokenizer.py   # Byte-Level BPE with special tags (<think>, <hypothesis>, <tool_call>)
 │   └── sequence_packer.py        # Zero-waste constant-length multipacking (128k ctx)
