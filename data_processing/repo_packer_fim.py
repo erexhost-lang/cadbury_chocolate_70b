@@ -11,8 +11,13 @@ import ast
 import os
 import random
 import sys
-from typing import Dict, List, Set, Tuple, Optional, Generator
-import networkx as nx
+from typing import Dict, List, Set, Tuple, Optional, Generator, Any
+try:
+    import networkx as nx
+    HAS_NETWORKX = True
+except ImportError:
+    HAS_NETWORKX = False
+    nx = None
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.logger import setup_logger

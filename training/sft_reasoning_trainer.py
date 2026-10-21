@@ -8,27 +8,30 @@ Key Methodologies:
 2. NEFTune (Noisy Embeddings Fine-Tuning): Injects scaled uniform noise into embeddings during
    training (alpha=5.0) to regularize against memorization of synthetic formatting templates.
 3. Special Token Embeddings: Expands vocabulary with <think>, <tool_call>, <tool_output> tags.
-4. YaRN RoPE Long-Context & FlashAttention-2: Handles up to 32k tokens of multi-file reasoning.
+4. CadburyMoEBlock FSDP Auto-Wrapping: Shards full 70B MoE layers across cluster GPUs.
 """
 
+from __future__ import annotations
+
 import argparse
+import json
 import math
 import os
 import sys
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from transformers import (
-    AutoModelForCausalLM,
     AutoTokenizer,
+    PreTrainedTokenizerBase,
     Trainer,
     TrainingArguments,
-    PreTrainedTokenizerBase,
 )
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from model.moe_mla_architecture import Cadbury70BMoEModel, CadburyMoEBlock, MLAConfig, MoEConfig
 from utils.logger import setup_logger
 
 logger = setup_logger("sft_reasoning_trainer")
@@ -64,10 +67,10 @@ class NEFTuneHook:
         if not module.training:
             return output
 
-        dims = torch.tensor(output.size(1) * output.size(2))
+        dims = torch.tensor(output.size(1) * output.size(2), device=output.device, dtype=torch.float32)
         mag_norm = self.noise_alpha / torch.sqrt(dims)
         noise = torch.zeros_like(output).uniform_(-1, 1) * mag_norm
-        return output + noise.to(output.device)
+        return output + noise
 
 
 # ==============================================================================
@@ -109,35 +112,32 @@ class CompletionOnlyReasoningCollator:
                 input_ids = input_ids[: self.max_length]
 
             labels = list(input_ids)
-            # Default: Mask everything with -100
             masked_labels = [-100] * len(labels)
 
-            # Find assistant spans and unmask only assistant thoughts and tool calls
-            # Everything else (system, user, tool outputs) stays -100
             seq_len = len(input_ids)
             i = 0
             in_assistant = False
             in_tool_output = False
 
             while i < seq_len:
-                # Check for assistant header start
-                if input_ids[i : i + len(self.response_template_ids)] == self.response_template_ids:
+                if self.response_template_ids and input_ids[i : i + len(self.response_template_ids)] == self.response_template_ids:
                     in_assistant = True
                     i += len(self.response_template_ids)
                     continue
 
-                # Check for tool_output start (must mask tool outputs even if inside conversation)
-                if input_ids[i : i + len(self.tool_out_start_ids)] == self.tool_out_start_ids:
+                if self.tool_out_start_ids and input_ids[i : i + len(self.tool_out_start_ids)] == self.tool_out_start_ids:
                     in_tool_output = True
                     i += len(self.tool_out_start_ids)
                     continue
 
-                if input_ids[i : i + len(self.tool_out_end_ids)] == self.tool_out_end_ids:
+                if self.tool_out_end_ids and input_ids[i : i + len(self.tool_out_end_ids)] == self.tool_out_end_ids:
                     in_tool_output = False
                     i += len(self.tool_out_end_ids)
                     continue
 
                 if in_assistant and not in_tool_output:
+                    masked_labels[i] = input_ids[i]
+                elif not self.response_template_ids:
                     masked_labels[i] = input_ids[i]
 
                 i += 1
@@ -146,7 +146,6 @@ class CompletionOnlyReasoningCollator:
             batch_labels.append(torch.tensor(masked_labels, dtype=torch.long))
             batch_attention_mask.append(torch.ones(len(input_ids), dtype=torch.long))
 
-        # Pad dynamically to max length in current batch
         input_ids_padded = torch.nn.utils.rnn.pad_sequence(
             batch_input_ids, batch_first=True, padding_value=self.tokenizer.pad_token_id or 0
         )
@@ -165,7 +164,49 @@ class CompletionOnlyReasoningCollator:
 
 
 # ==============================================================================
-# 3. SFT Training Execution Setup
+# 3. JSONL SFT Dataset
+# ==============================================================================
+class SFTReasoningDataset(Dataset):
+    """Loads tokenized multi-turn reasoning conversations from JSONL."""
+
+    def __init__(self, data_file: str, tokenizer: PreTrainedTokenizerBase, max_length: int = 32768):
+        self.samples: List[List[int]] = []
+        if os.path.exists(data_file):
+            with open(data_file, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        record = json.loads(line)
+                        if "input_ids" in record:
+                            self.samples.append(record["input_ids"][:max_length])
+                        elif "text" in record:
+                            tokens = tokenizer.encode(record["text"], max_length=max_length, truncation=True)
+                            self.samples.append(tokens)
+                    except Exception:
+                        continue
+        else:
+            logger.warning(f"Data file '{data_file}' not found. Initializing with sample reasoning conversation.")
+            sample_text = (
+                "<|start_header_id|>system<|end_header_id|>\n"
+                "You are an expert coder.<|eot_id|>\n"
+                "<|start_header_id|>user<|end_header_id|>\n"
+                "Implement quickselect in Python.<|eot_id|>\n"
+                "<|start_header_id|>assistant<|end_header_id|>\n"
+                "<think>We need O(N) average time complexity using Lomuto partitioning.</think>\n"
+                "```python\ndef quickselect(arr, k): pass\n```<|eot_id|>"
+            )
+            self.samples.append(tokenizer.encode(sample_text))
+
+    def __len__(self) -> int:
+        return len(self.samples)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        return {"input_ids": self.samples[idx]}
+
+
+# ==============================================================================
+# 4. SFT Training Execution Setup
 # ==============================================================================
 def setup_sft_reasoning_trainer(
     model_name_or_path: str = "checkpoints/cadbury-70b",
@@ -175,24 +216,23 @@ def setup_sft_reasoning_trainer(
     max_seq_len: int = 32768,
 ):
     """Initializes the Reasoning SFT Trainer with NEFTune and Completion-Only masking."""
-    logger.info(f"Loading base model and tokenizer: {model_name_or_path}")
+    logger.info(f"Setting up SFT for Cadbury-70B model from: {model_name_or_path}")
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, trust_remote_code=True)
-    
+    tokenizer = AutoTokenizer.from_pretrained(
+        model_name_or_path if os.path.exists(model_name_or_path) else "tokenization/cadbury_tokenizer",
+        trust_remote_code=True,
+    )
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = "<|pad|>"
+
     # Register special tokens
     num_added = tokenizer.add_special_tokens({"additional_special_tokens": REASONING_SPECIAL_TOKENS})
     logger.info(f"Registered {num_added} special reasoning/tool tokens.")
 
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name_or_path,
-        torch_dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2",
-        trust_remote_code=True,
-    )
-
-    if num_added > 0:
-        model.resize_token_embeddings(len(tokenizer))
-        logger.info(f"Resized model embeddings to: {len(tokenizer)}")
+    # Instantiate Cadbury 70B MoE model
+    mla_cfg = MLAConfig(hidden_size=8192, max_position_embeddings=max_seq_len)
+    moe_cfg = MoEConfig(hidden_size=8192)
+    model = Cadbury70BMoEModel(vocab_size=len(tokenizer), mla_cfg=mla_cfg, moe_cfg=moe_cfg)
 
     # Attach NEFTune hook to token embeddings
     if neftune_alpha > 0:
@@ -203,6 +243,8 @@ def setup_sft_reasoning_trainer(
         tokenizer=tokenizer,
         max_length=max_seq_len,
     )
+
+    dataset = SFTReasoningDataset(dataset_path, tokenizer, max_length=max_seq_len)
 
     training_args = TrainingArguments(
         output_dir=output_dir,
@@ -219,12 +261,19 @@ def setup_sft_reasoning_trainer(
         save_total_limit=3,
         gradient_checkpointing=True,
         fsdp="full_shard auto_wrap",
-        fsdp_transformer_layer_cls_to_wrap="LlamaDecoderLayer",
+        fsdp_transformer_layer_cls_to_wrap="CadburyMoEBlock",
         report_to="none",
     )
 
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=dataset,
+        data_collator=collator,
+    )
+
     logger.info("Reasoning & Tool SFT Trainer configured successfully.")
-    return model, tokenizer, collator, training_args
+    return trainer
 
 
 if __name__ == "__main__":
@@ -236,5 +285,11 @@ if __name__ == "__main__":
     parser.add_argument("--max-seq-len", type=int, default=32768)
     args = parser.parse_args()
 
-    logger.info("Initializing SFT Reasoning pipeline scaffold.")
-    # Script is ready for multi-node execution with torchrun / deepspeed
+    trainer = setup_sft_reasoning_trainer(
+        model_name_or_path=args.model_path,
+        dataset_path=args.data_file,
+        output_dir=args.output_dir,
+        neftune_alpha=args.neftune_alpha,
+        max_seq_len=args.max_seq_len,
+    )
+    logger.info("SFT Reasoning Trainer successfully initialized.")

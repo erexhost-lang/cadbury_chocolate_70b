@@ -3,8 +3,12 @@ GPU & Host Memory Profiler for 70B Distributed Training
 Tracks CUDA VRAM allocation, peak memory spikes, and host RAM.
 """
 
-import os
-import psutil
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
+
 import torch
 from typing import Dict, Any
 
@@ -26,8 +30,16 @@ class MemoryTracker:
         summary = {}
 
         # System RAM usage
-        process = psutil.Process(os.getpid())
-        ram_gb = process.memory_info().rss / (1024 ** 3)
+        if HAS_PSUTIL:
+            process = psutil.Process(os.getpid())
+            ram_gb = process.memory_info().rss / (1024 ** 3)
+        else:
+            try:
+                import resource
+                # ru_maxrss is in kilobytes on Linux
+                ram_gb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 ** 2)
+            except Exception:
+                ram_gb = 0.0
         summary["host_ram_used_gb"] = round(ram_gb, 2)
 
         # CUDA VRAM usage

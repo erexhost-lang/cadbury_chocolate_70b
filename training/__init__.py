@@ -1,7 +1,29 @@
 """Distributed Training, SFT Reasoning, Adaptive Compute, and GRPO RLVR Scripts for Cadbury-Chocolate 70B."""
-from .pretrain_fsdp import build_70b_config
-from .sft_reasoning_trainer import setup_sft_reasoning_trainer, CompletionOnlyReasoningCollator, NEFTuneHook
-from .adaptive_compute import MultiTokenPredictionModule, EntropyReasoningGate, AdaptiveInferenceWrapper
+
+from .pretrain_fsdp import (
+    setup_distributed,
+    init_weights_fn,
+    get_cosine_lr,
+    PretrainDatasetFactory,
+    BinaryMemoryMappedDataset,
+    StreamingJSONLTokenDataset,
+)
+from .sft_reasoning_trainer import (
+    setup_sft_reasoning_trainer,
+    CompletionOnlyReasoningCollator,
+    NEFTuneHook,
+    SFTReasoningDataset,
+)
+from .train_qlora import (
+    load_70b_quantized_model,
+    attach_lora_adapters,
+    CADBURY_LORA_TARGET_MODULES,
+)
+from .adaptive_compute import (
+    MultiTokenPredictionModule,
+    EntropyReasoningGate,
+    AdaptiveInferenceWrapper,
+)
 from .rl_grpo_verifier import (
     VerificationTier,
     SandboxExecutionResult,
@@ -10,22 +32,28 @@ from .rl_grpo_verifier import (
     validate_tier_1_static,
     SandboxExecutionEngine,
     AntiRewardHackingGuard,
-    AdaptiveBudgetPenalizer,
+    ReasoningAndExplorationRewardManager,
     MultiTierVerificationPipeline,
     GRPOTrainingEngine,
-    format_reward_fn,
-    syntax_and_ast_reward_fn,
-    execution_sandbox_reward_fn,
-    adaptive_thinking_budget_reward_fn,
-    information_gain_tool_reward_fn,
-    anti_reward_hacking_fn,
 )
 
+# Backward-compatible alias
+AdaptiveBudgetPenalizer = ReasoningAndExplorationRewardManager
+
 __all__ = [
-    "build_70b_config",
+    "setup_distributed",
+    "init_weights_fn",
+    "get_cosine_lr",
+    "PretrainDatasetFactory",
+    "BinaryMemoryMappedDataset",
+    "StreamingJSONLTokenDataset",
     "setup_sft_reasoning_trainer",
     "CompletionOnlyReasoningCollator",
     "NEFTuneHook",
+    "SFTReasoningDataset",
+    "load_70b_quantized_model",
+    "attach_lora_adapters",
+    "CADBURY_LORA_TARGET_MODULES",
     "MultiTokenPredictionModule",
     "EntropyReasoningGate",
     "AdaptiveInferenceWrapper",
@@ -36,13 +64,8 @@ __all__ = [
     "validate_tier_1_static",
     "SandboxExecutionEngine",
     "AntiRewardHackingGuard",
+    "ReasoningAndExplorationRewardManager",
     "AdaptiveBudgetPenalizer",
     "MultiTierVerificationPipeline",
     "GRPOTrainingEngine",
-    "format_reward_fn",
-    "syntax_and_ast_reward_fn",
-    "execution_sandbox_reward_fn",
-    "adaptive_thinking_budget_reward_fn",
-    "information_gain_tool_reward_fn",
-    "anti_reward_hacking_fn",
 ]

@@ -260,26 +260,71 @@ class DistributedLengthStratifiedSampler(Sampler[List[int]]):
         self.base_sampler.set_epoch(epoch)
 
     def __iter__(self) -> Iterator[List[int]]:
-        # Generate global batch schedule
-        all_batches = list(self.base_sampler)
+        """
+        Guarantees synchronized lock-step execution across all distributed ranks:
+        Iterates stratum-by-stratum so every rank processes batches from the EXACT same
+        bucket boundary concurrently, eliminating NCCL barrier timeouts and pipeline stragglers.
+        """
+        rng = random.Random(self.config.seed + self.epoch)
+        rank_batches: List[List[int]] = []
 
-        # Pad global batches to be divisible by num_replicas
-        total_batches = len(all_batches)
-        remainder = total_batches % self.num_replicas
-        if remainder != 0:
-            pad_count = self.num_replicas - remainder
-            # Replicate initial batches to balance rank counts
-            all_batches.extend(all_batches[:pad_count])
+        bucket_order = list(self.config.bucket_boundaries)
+        if self.shuffle:
+            rng.shuffle(bucket_order)
 
-        # Slice batches for this specific rank
-        rank_batches = all_batches[self.rank :: self.num_replicas]
+        for bucket_len in bucket_order:
+            indices = list(self.base_sampler.bucket_map[bucket_len])
+            if not indices:
+                continue
+
+            batch_size = self.config.get_batch_size_for_bucket(bucket_len)
+            if self.shuffle:
+                indices.sort(key=lambda i: self.lengths[i])
+                stratum_batches = [
+                    indices[i : i + batch_size]
+                    for i in range(0, len(indices), batch_size)
+                ]
+                if self.config.drop_last and stratum_batches and len(stratum_batches[-1]) < batch_size:
+                    stratum_batches.pop()
+                rng.shuffle(stratum_batches)
+            else:
+                stratum_batches = [
+                    indices[i : i + batch_size]
+                    for i in range(0, len(indices), batch_size)
+                ]
+                if self.config.drop_last and stratum_batches and len(stratum_batches[-1]) < batch_size:
+                    stratum_batches.pop()
+
+            if not stratum_batches:
+                continue
+
+            # Align stratum batches across replicas
+            remainder = len(stratum_batches) % self.num_replicas
+            if remainder != 0:
+                pad_count = self.num_replicas - remainder
+                stratum_batches.extend(stratum_batches[:pad_count])
+
+            # Slice for this rank within this bucket stratum
+            assigned = stratum_batches[self.rank :: self.num_replicas]
+            rank_batches.extend(assigned)
 
         for batch in rank_batches:
             yield batch
 
     def __len__(self) -> int:
-        total = len(self.base_sampler)
-        return int(math.ceil(total / self.num_replicas))
+        total = 0
+        for bucket_len in self.config.bucket_boundaries:
+            indices = self.base_sampler.bucket_map[bucket_len]
+            bs = self.config.get_batch_size_for_bucket(bucket_len)
+            if not indices:
+                continue
+            stratum_count = len(indices) // bs if self.config.drop_last else (len(indices) + bs - 1) // bs
+            # Account for padding to num_replicas
+            rem = stratum_count % self.num_replicas
+            if rem != 0:
+                stratum_count += (self.num_replicas - rem)
+            total += stratum_count // self.num_replicas
+        return total
 
 
 # ==============================================================================

@@ -9,7 +9,12 @@ import json
 import os
 import sys
 from typing import Generator, Dict, Any, List, Optional
-from datasets import load_dataset
+try:
+    from datasets import load_dataset
+    HAS_DATASETS = True
+except ImportError:
+    HAS_DATASETS = False
+    load_dataset = None
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.logger import setup_logger

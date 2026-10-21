@@ -7,10 +7,19 @@ and FIM (Fill-In-The-Middle) control tokens without destructive normalization.
 import argparse
 import os
 import sys
-from typing import List, Generator
-
-from tokenizers import Tokenizer, decoders, models, normalizers, pre_tokenizers, trainers
-from tokenizers.models import BPE
+try:
+    from tokenizers import Tokenizer, decoders, models, normalizers, pre_tokenizers, trainers
+    from tokenizers.models import BPE
+    HAS_TOKENIZERS = True
+except ImportError:
+    HAS_TOKENIZERS = False
+    Tokenizer = Any
+    BPE = Any
+    decoders = Any
+    models = Any
+    normalizers = Any
+    pre_tokenizers = Any
+    trainers = Any
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.logger import setup_logger

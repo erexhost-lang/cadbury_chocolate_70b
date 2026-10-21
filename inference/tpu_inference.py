@@ -6,15 +6,17 @@ Key Architectural Optimizations:
 1. Persistent XLA Graph Compilation Cache:
    - Performs ahead-of-time graph compilation across static buckets [128, 512, 2048, 8192, 32768, 131072].
    - Eliminates JIT compilation pauses during live production inference (0 recompilations).
-2. Contiguous HBM Static Memory Management:
-   - Uses TPUContiguousKVCache with in-place buffer updates.
-   - Eliminates TPU HBM memory fragmentation and allocation bottlenecks.
+2. Low-Rank MLA KV Cache with Matrix Absorption:
+   - Feeds compressed latent KV representations (576 floats/token) across autoregressive steps.
+   - Decoupled RoPE position tracking with explicit sequence offsets.
 3. 3D SPMD Parallel Batching:
    - Evaluates batches across (DP, EP, TP) = (2, 8, 2) TPU device mesh.
    - High-throughput matrix multiplication leveraging 4.8 Tbps Inter-Chip Interconnects (ICI).
 4. Full 70B MoE + MLA Serving:
-   - No downscaling. Serves the full 70.55B parameter model with ~14.1B active parameters per token.
+   - Serves the full 70.55B parameter model with ~14.1B active parameters per token.
 """
+
+from __future__ import annotations
 
 import math
 import os
@@ -28,17 +30,17 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.logger import setup_logger
-from model.moe_mla_architecture import MLAConfig, MoEConfig, Cadbury70BMoEModel
+from model.moe_mla_architecture import Cadbury70BMoEModel, MLAConfig, MoEConfig
 from hardware.tpu_optimization import (
-    TPUMeshConfig,
-    TPUEnvironmentManager,
     Cadbury70BShardingManager,
-    TPUContiguousKVCache,
     OpenXLAOptimizer,
+    TPUContiguousKVCache,
+    TPUEnvironmentManager,
+    TPUMeshConfig,
     HAS_TORCH_XLA,
     xm,
 )
+from utils.logger import setup_logger
 
 logger = setup_logger("tpu_inference")
 
@@ -126,10 +128,11 @@ class TPUInferenceEngine:
         )
         for bucket_len in [128, 512, 2048]:
             dummy_input = torch.zeros((1, bucket_len), dtype=torch.long)
+            dummy_pos = torch.arange(bucket_len, dtype=torch.long).unsqueeze(0)
             try:
                 with torch.no_grad():
                     # Run static trace to trigger XLA compilation
-                    _ = self.compiled_model(dummy_input)
+                    logits, _, _ = self.compiled_model(dummy_input, position_ids=dummy_pos)
                 logger.info(f"  [XLA Warmup] Compiled bucket: {bucket_len} tokens -> Cache Warm.")
             except Exception as e:
                 logger.debug(f"XLA warmup pass for bucket {bucket_len}: {e}")
@@ -143,6 +146,7 @@ class TPUInferenceEngine:
     ) -> Tuple[List[str], GenerationBenchmarkResult]:
         """
         Executes hardware-accelerated autoregressive generation on TPU Pod.
+        Uses MLA matrix-absorbed caching and explicit position offsets across decode steps.
         """
         if isinstance(prompts, str):
             prompts = [prompts]
@@ -150,27 +154,49 @@ class TPUInferenceEngine:
         temp = temperature if temperature is not None else self.cfg.temperature
         p_val = top_p if top_p is not None else self.cfg.top_p
 
-        # Mock tokenization if tokenizer not supplied
         batch_size = len(prompts)
         if self.tokenizer is not None:
             tokenized = self.tokenizer(prompts, return_tensors="pt", padding=True)
             input_ids = tokenized["input_ids"]
         else:
             # Deterministic token IDs for benchmark simulation
-            seq_lens = [len(p.split()) * 2 for p in prompts]
+            seq_lens = [max(8, len(p.split()) * 2) for p in prompts]
             max_len = max(seq_lens)
             input_ids = torch.randint(100, 10000, (batch_size, max_len))
 
         t0 = time.time()
+        device = next(self.model.parameters()).device if list(self.model.parameters()) else torch.device("cpu")
+        input_ids = input_ids.to(device)
+
+        # Pad to static bucket boundary to eliminate XLA dynamic shape recompilation
         padded_input, original_len = self.optimizer.pad_to_static_bucket(
             input_ids, pad_token_id=self.cfg.pad_token_id
         )
+        padded_input = padded_input.to(device)
+        bucket_len = padded_input.shape[-1]
 
         # 1. Prefill Phase (Initial Prompt Encoding)
+        prefill_pos = torch.arange(0, bucket_len, device=device, dtype=torch.long).unsqueeze(0).expand(batch_size, -1)
+
         with torch.no_grad():
-            logits = self.compiled_model(padded_input)
+            # Unpack 3-tuple returned by Cadbury70BMoEModel: (logits, past_key_values, watchdog_loss)
+            logits, past_key_values, _ = self.compiled_model(
+                padded_input,
+                position_ids=prefill_pos,
+            )
+            # Evaluate logits at the true original prompt boundary (prior to bucket padding)
             next_token_logits = logits[:, original_len - 1, :]
-            
+
+            # Slice cache up to original prompt length to discard padding token cache states
+            if past_key_values is not None:
+                past_key_values = [
+                    (
+                        kv_latent[:, :original_len, :],
+                        k_rope[:, :, :original_len, :],
+                    )
+                    for (kv_latent, k_rope) in past_key_values
+                ]
+
             if temp > 0:
                 probs = F.softmax(next_token_logits / temp, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
@@ -180,15 +206,19 @@ class TPUInferenceEngine:
         t_prefill = time.time()
         ttft_ms = (t_prefill - t0) * 1000.0
 
-        # 2. Decode Phase (Autoregressive Token Generation)
+        # 2. Decode Phase (Autoregressive Token Generation with Matrix Absorption)
         generated_tokens_list = [next_token]
-        curr_len = original_len + 1
+        curr_pos = original_len
         decode_start = time.time()
 
         for step in range(max_new_tokens - 1):
             with torch.no_grad():
-                # Single-token step
-                step_logits = self.compiled_model(next_token)
+                step_pos = torch.full((batch_size, 1), curr_pos, device=device, dtype=torch.long)
+                step_logits, past_key_values, _ = self.compiled_model(
+                    next_token,
+                    past_key_values=past_key_values,
+                    position_ids=step_pos,
+                )
                 step_next_logits = step_logits[:, -1, :]
 
                 if temp > 0:
@@ -198,7 +228,7 @@ class TPUInferenceEngine:
                     next_token = torch.argmax(step_next_logits, dim=-1, keepdim=True)
 
                 generated_tokens_list.append(next_token)
-                curr_len += 1
+                curr_pos += 1
 
                 # Stop if all batches generated EOS
                 if (next_token == self.cfg.eos_token_id).all():
@@ -212,7 +242,6 @@ class TPUInferenceEngine:
 
         # Model FLOPs Utilization (MFU) Calculation on TPU v5p
         # 70B MoE with ~14.1B active parameters per token -> 2 * 14.1B FLOPs per token
-        # TPU v5p chip peak = 459 TFLOPS. Across 32 chips = 14,688 TFLOPS.
         flops_per_token = 2 * 14.1e9
         total_flops = flops_per_token * (original_len + num_generated) * batch_size
         peak_cluster_flops = self.cfg.mesh_cfg.total_chips * 459e12
@@ -250,7 +279,6 @@ if __name__ == "__main__":
     print("Cadbury-70B Frontier V2: TPU Hardware-Aware Inference Runner Benchmark")
     print("=" * 80)
 
-    # 1. Initialize Configuration
     mesh_config = TPUMeshConfig(
         data_parallel_size=2,
         expert_parallel_size=8,
@@ -260,22 +288,24 @@ if __name__ == "__main__":
     inf_config = TPUInferenceConfig(
         mesh_cfg=mesh_config,
         max_batch_size=4,
-        warmup_buckets=False, # Skip full JIT loop for local test
+        warmup_buckets=False,
     )
 
-    # 2. Instantiate Mock Engine for Architecture Verification
-    # (Uses shallow 2-layer block for quick local dry-run)
-    mock_model = Cadbury70BMoEModel(num_layers=2)
+    mock_model = Cadbury70BMoEModel(
+        vocab_size=10000,
+        num_layers=2,
+        mla_cfg=MLAConfig(hidden_size=256, num_heads=4, head_dim=64, kv_lora_rank=32, qk_rope_head_dim=16),
+        moe_cfg=MoEConfig(hidden_size=256, intermediate_size=128, num_routed_experts=4, num_shared_experts=2, top_k=2),
+    )
     engine = TPUInferenceEngine(config=inf_config, model=mock_model)
 
-    # 3. Run Benchmark Simulation
     sample_prompts = [
         "Implement a lock-free ring buffer in C++ using atomic memory fences.",
         "Design a distributed rate-limiting middleware using Redis Cell.",
     ]
 
     print(f"\n[Serving Benchmark: Batch Size = {len(sample_prompts)}]")
-    responses, metrics = engine.generate(sample_prompts, max_new_tokens=16, temperature=0.1)
+    responses, metrics = engine.generate(sample_prompts, max_new_tokens=8, temperature=0.1)
 
     print(f"Time-To-First-Token (TTFT): {metrics.time_to_first_token_ms:.2f} ms")
     print(f"Inter-Token Latency (ITL):  {metrics.inter_token_latency_ms:.2f} ms/token")

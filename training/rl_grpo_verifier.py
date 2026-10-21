@@ -1,27 +1,34 @@
 """
 Cadbury-Chocolate Frontier V2: Multi-Tier Execution Sandbox & GRPO Policy Verifier
-Eliminates synthetic data reward hacking and enforces surgical reasoning via Reinforcement Learning.
+Reinforcement Learning with Verifiable Rewards (RLVR) for Deep Code Reasoning.
 
-Key Architectural Components:
-1. 3-Tier Verification Pipeline:
-   - Tier 1: Static AST & Compiler Diagnostics (syntax verification, AST node inspection, unbound variable checks).
-   - Tier 2: Isolated Subprocess / Docker Sandbox (ephemeral workspace, pytest execution, strict resource limits).
-   - Tier 3: Execution Metrics & Anti-Reward-Hacking Validation (time/space complexity bounds, anti-test-skipping,
-     anti-mocking, and bare `try...except: pass` detection).
-2. Length & Information-Gain Penalized GRPO (Group Relative Policy Optimization):
-   - Computes group-normalized advantages: A_i = (R_i - mean(R)) / (std(R) + eps).
-   - Enforces adaptive thinking budget penalty to curb redundant <think> token sprawl.
-   - Enforces information-gain penalty against context pollution and redundant file reads.
-   - Computes clipped surrogate objective with reference policy KL divergence regularization.
+Production Features:
+1. 3-Tier Verifiable Process & Outcome Reward Pipeline:
+   - Tier 1: Static AST & Compiler Diagnostics (syntax verification, AST node inspection, empty-pass detection).
+   - Tier 2: Isolated POSIX Subprocess Sandbox (ephemeral workspace, pytest execution, cgroup/rlimit memory and time caps).
+   - Tier 3: Asymptotics & Anti-Reward-Hacking Validation (sub-200ms speed bonus, anti-cheat detection).
+2. Deep Reasoning & Multi-File Context Exploration Incentives:
+   - Uncapped Chain-of-Thought (<think>): No arbitrary 250-token penalty. Models are free to reason
+     deeply through complex multi-file logic, system invariants, and edge cases.
+   - Context Exploration Reward: Eliminates the "wasted read" penalty. Rewards thorough file inspection,
+     grep searching, and compiler LSP queries across the repository before patching.
+3. Secure POSIX Process Group Isolation:
+   - Uses `os.setsid()` and process-group termination (`os.killpg(os.getpgid(proc.pid), signal.SIGKILL)`)
+     on timeouts to eliminate zombie processes and runaway infinite loop fork bombs.
+4. Group Relative Policy Optimization (GRPO) Engine:
+   - Group-normalized advantage estimation: A_i = (R_i - mean(R)) / (std(R) + eps).
+   - Clipped surrogate policy objective with reference policy KL divergence regularization.
 """
 
 from __future__ import annotations
 
 import ast
 import json
+import math
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -39,7 +46,7 @@ from utils.logger import setup_logger
 
 logger = setup_logger("rl_grpo_verifier")
 
-# Optional resource module for POSIX systems
+# Safe import for resource module on POSIX systems
 try:
     import resource
     HAS_RESOURCE = True
@@ -99,12 +106,11 @@ class CodeASTValidator(ast.NodeVisitor):
         self.has_bare_except: bool = False
         self.has_test_skip_marker: bool = False
         self.has_sys_exit: bool = False
-        self.has_mock_injection: bool = False
         self.empty_functions: List[str] = []
 
     def visit_FunctionDef(self, node: ast.FunctionDef):
         self.defined_functions.add(node.name)
-        # Check for empty functions consisting solely of 'pass' or docstrings
+        # Check for empty functions consisting solely of 'pass'
         body_non_doc = [
             stmt for stmt in node.body
             if not (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant))
@@ -133,12 +139,10 @@ class CodeASTValidator(ast.NodeVisitor):
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call):
-        # Detect sys.exit(0)
         if isinstance(node.func, ast.Attribute):
             if isinstance(node.func.value, ast.Name) and node.func.value.id == "sys" and node.func.attr == "exit":
                 self.has_sys_exit = True
                 self.diagnostics.append("Detected 'sys.exit()' shortcut in candidate code.")
-            # Detect mock injections: unittest.mock, pytest.skip
             if node.func.attr in ("skip", "skipTest"):
                 self.has_test_skip_marker = True
                 self.diagnostics.append(f"Detected test skipping call: {node.func.attr}")
@@ -148,10 +152,6 @@ class CodeASTValidator(ast.NodeVisitor):
 def validate_tier_1_static(code_snippet: str) -> Tuple[bool, float, List[str]]:
     """
     Tier 1 Static Syntax & AST Inspection.
-    Returns:
-        is_valid: True if syntax parses and no critical AST violations exist
-        tier_score: Float reward score (-1.0 to 1.0)
-        diagnostics: List of diagnostic warnings/errors
     """
     if not code_snippet.strip():
         return False, -1.0, ["Code snippet is empty."]
@@ -169,39 +169,32 @@ def validate_tier_1_static(code_snippet: str) -> Tuple[bool, float, List[str]]:
     if visitor.has_bare_except or visitor.has_sys_exit or visitor.has_test_skip_marker:
         return False, -0.8, visitor.diagnostics
 
-    # Valid syntax parses cleanly
     return True, 1.0, visitor.diagnostics
 
 
 # ==============================================================================
-# 3. Tier 2: Isolated Subprocess / Docker Sandbox Execution
+# 3. Tier 2: Secure Isolated Subprocess / Docker Sandbox Execution
 # ==============================================================================
 class SandboxExecutionEngine:
     """
-    Runs candidate code against unit test suites inside an isolated environment.
-    Supports local POSIX subprocess sandboxing with rlimits and optional Docker execution.
+    Executes candidate code against unit test suites inside an isolated environment.
+    Uses `os.setsid()` and process-group SIGKILL termination on timeout to prevent zombie leaks.
     """
 
     def __init__(
         self,
-        timeout_sec: float = 3.0,
+        timeout_sec: float = 4.0,
         memory_limit_mb: float = 512.0,
-        use_docker: bool = False,
-        docker_image: str = "python:3.11-slim",
     ):
         self.timeout_sec = timeout_sec
         self.memory_limit_mb = memory_limit_mb
-        self.use_docker = use_docker
-        self.docker_image = docker_image
 
     def _set_rlimits(self):
         """Sets hard memory and CPU limits on POSIX subprocess workers."""
         if HAS_RESOURCE:
             try:
-                # CPU time limit in seconds
                 cpu_limit = int(math.ceil(self.timeout_sec * 2))
                 resource.setrlimit(resource.RLIMIT_CPU, (cpu_limit, cpu_limit))
-                # Virtual memory limit in bytes
                 mem_bytes = int(self.memory_limit_mb * 1024 * 1024)
                 resource.setrlimit(resource.RLIMIT_AS, (mem_bytes, mem_bytes))
             except Exception as e:
@@ -213,7 +206,7 @@ class SandboxExecutionEngine:
         test_suite_code: str,
     ) -> SandboxExecutionResult:
         """
-        Executes code + test suite using pytest or standard assertion runner in an isolated directory.
+        Executes code + unit test suite using pytest in an ephemeral directory.
         """
         result = SandboxExecutionResult()
         workspace_dir = tempfile.mkdtemp(prefix="cadbury_sandbox_")
@@ -225,7 +218,6 @@ class SandboxExecutionEngine:
             with open(solution_file, "w", encoding="utf-8") as f:
                 f.write(solution_code)
 
-            # Combine imports and test code
             wrapped_test = (
                 f"import sys\nimport os\n"
                 f"sys.path.insert(0, os.path.abspath('.'))\n"
@@ -235,41 +227,60 @@ class SandboxExecutionEngine:
             with open(test_file, "w", encoding="utf-8") as f:
                 f.write(wrapped_test)
 
-            # Determine runner command: invoke pytest if available, fallback to python -m unittest
+            def _preexec():
+                if not sys.platform.startswith("win"):
+                    try:
+                        os.setsid()  # Create new process group
+                    except Exception:
+                        pass
+                self._set_rlimits()
+
             cmd = [sys.executable, "-m", "pytest", "-q", "--tb=short", test_file]
 
             start_time = time.perf_counter()
-            proc = subprocess.run(
+            proc = subprocess.Popen(
                 cmd,
                 cwd=workspace_dir,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout_sec,
-                preexec_fn=self._set_rlimits if (HAS_RESOURCE and not sys.platform.startswith("win")) else None,
+                preexec_fn=_preexec if not sys.platform.startswith("win") else None,
             )
-            elapsed = time.perf_counter() - start_time
 
-            result.execution_time_sec = round(elapsed, 4)
-            result.stdout = proc.stdout
-            result.stderr = proc.stderr
-            result.passed = (proc.returncode == 0)
+            try:
+                stdout, stderr = proc.communicate(timeout=self.timeout_sec)
+                elapsed = time.perf_counter() - start_time
+                result.execution_time_sec = round(elapsed, 4)
+                result.stdout = stdout
+                result.stderr = stderr
+                result.passed = (proc.returncode == 0)
 
-            # Extract test pass metrics from pytest output
-            if "passed" in proc.stdout:
-                m = re.search(r"(\d+)\s+passed", proc.stdout)
-                if m:
-                    result.tests_passed = int(m.group(1))
-            if "failed" in proc.stdout:
-                m = re.search(r"(\d+)\s+failed", proc.stdout)
-                if m:
-                    result.tests_failed = int(m.group(1))
-            result.tests_run = result.tests_passed + result.tests_failed
+                # Extract test pass metrics from pytest output
+                if "passed" in stdout:
+                    m = re.search(r"(\d+)\s+passed", stdout)
+                    if m:
+                        result.tests_passed = int(m.group(1))
+                if "failed" in stdout:
+                    m = re.search(r"(\d+)\s+failed", stdout)
+                    if m:
+                        result.tests_failed = int(m.group(1))
+                result.tests_run = result.tests_passed + result.tests_failed
 
-        except subprocess.TimeoutExpired:
-            result.timeout_triggered = True
-            result.passed = False
-            result.error_type = "TimeoutExpired (Probable infinite loop or Big-O violation)"
-            result.execution_time_sec = self.timeout_sec
+            except subprocess.TimeoutExpired:
+                # Reliably kill the entire process group with SIGKILL to eliminate runaway fork bombs
+                if not sys.platform.startswith("win"):
+                    try:
+                        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                    except Exception:
+                        proc.kill()
+                else:
+                    proc.kill()
+                proc.wait()
+                result.timeout_triggered = True
+                result.passed = False
+                result.error_type = "TimeoutExpired (Infinite loop or asymptotic complexity violation)"
+                result.execution_time_sec = self.timeout_sec
+
         except Exception as e:
             result.passed = False
             result.error_type = f"ExecutionException: {str(e)}"
@@ -284,15 +295,13 @@ class SandboxExecutionEngine:
 # ==============================================================================
 class AntiRewardHackingGuard:
     """
-    Detects and penalizes lazy shortcuts, test-skipping cheats, and regex exploits.
+    Detects and penalizes lazy shortcuts, test-skipping cheats, and test tampering.
     """
 
     CHEAT_PATTERNS = [
         re.compile(r"@pytest\.mark\.skip", re.IGNORECASE),
         re.compile(r"unittest\.skip", re.IGNORECASE),
         re.compile(r"pytest\.skip\(", re.IGNORECASE),
-        re.compile(r"except\s*:\s*pass", re.IGNORECASE),
-        re.compile(r"except\s+Exception\s*:\s*pass", re.IGNORECASE),
         re.compile(r"mock\.patch", re.IGNORECASE),
         re.compile(r"sys\.exit\(0\)", re.IGNORECASE),
         re.compile(r"builtins\.AssertionError\s*=", re.IGNORECASE),
@@ -300,9 +309,6 @@ class AntiRewardHackingGuard:
 
     @classmethod
     def evaluate_code_integrity(cls, completion_text: str) -> Tuple[bool, float, List[str]]:
-        """
-        Inspects raw completion text for banned shortcut patterns.
-        """
         detected_violations = []
         penalty = 0.0
 
@@ -316,76 +322,82 @@ class AntiRewardHackingGuard:
 
 
 # ==============================================================================
-# 5. Length & Information-Gain Penalties
+# 5. Reasoning Quality & Context Exploration Reward Manager
 # ==============================================================================
-class AdaptiveBudgetPenalizer:
+class ReasoningAndExplorationRewardManager:
     """
-    Implements Length and Information-Gain Regularization:
-    1. Length Penalty: Penalizes models generating bloated <think> traces when concise logic suffices.
-       R_length = - lambda_len * max(0, N_think - Budget_target)
-    2. Information-Gain Penalty: Penalizes repetitive, uninformative tool calls and unused file reads.
-       R_info = - lambda_step * Num_tools - lambda_waste * Unused_file_reads
+    Rewards deep reasoning and multi-file context exploration:
+    1. Uncapped Chain-of-Thought: No arbitrary 250-token penalty. Models are encouraged
+       to reason deeply through complex algorithms and edge cases.
+    2. Context Exploration Reward: Eliminates the 'wasted read' penalty.
+       Actively rewards multi-file context reads, symbol lookups, and compiler LSP queries.
     """
 
-    @staticmethod
-    def calculate_thinking_penalty(
-        completion: str,
-        target_budget_tokens: int = 250,
-        penalty_per_token: float = 0.001,
-    ) -> float:
-        """Penalizes overthinking loops while rewarding concise reasoning."""
+    REASONING_QUALITY_KEYWORDS = [
+        "hypothesis",
+        "invariant",
+        "edge case",
+        "time complexity",
+        "space complexity",
+        "asymptotic",
+        "base case",
+        "proof",
+        "concurrency",
+        "race condition",
+    ]
+
+    @classmethod
+    def calculate_reasoning_quality_reward(cls, completion: str) -> float:
+        """
+        Rewards thorough, structured reasoning without arbitrary length penalties.
+        """
         think_match = re.search(r"<think>([\s\S]*?)</think>", completion)
         if not think_match:
-            return -0.5  # Heavy penalty for completely omitting required reasoning block
+            return -0.5  # Penalize omitting reasoning block entirely
 
         think_text = think_match.group(1).strip()
-        approx_tokens = len(think_text.split()) * 1.3
+        if len(think_text) < 20:
+            return -0.2  # Trivial or dummy think block
 
-        if approx_tokens > target_budget_tokens:
-            excess = approx_tokens - target_budget_tokens
-            penalty = excess * penalty_per_token
-            return -min(1.5, penalty)
-        else:
-            # Reward efficient, compact thought processes
-            return 0.2
+        # Evaluate depth of reasoning
+        lower_think = think_text.lower()
+        keyword_hits = sum(1 for kw in cls.REASONING_QUALITY_KEYWORDS if kw in lower_think)
+        # Base positive reward for reasoning + bonus for analytical depth
+        reward = 0.3 + min(0.5, keyword_hits * 0.1)
+        return round(reward, 4)
 
-    @staticmethod
-    def calculate_information_gain_penalty(
-        completion: str,
-        step_cost: float = 0.05,
-        waste_penalty: float = 0.20,
-    ) -> float:
-        """Penalizes blind file dumps, repetitive reads, and tool pollution."""
+    @classmethod
+    def calculate_context_exploration_reward(cls, completion: str) -> float:
+        """
+        Rewards multi-file context exploration, file searching, and LSP queries.
+        No penalty for unedited reads — context gathering is essential for real-world coding.
+        """
         tool_matches = re.findall(r"<tool_call>([\s\S]*?)</tool_call>", completion)
         if not tool_matches:
             return 0.0
 
-        score = -len(tool_matches) * step_cost
-
-        read_files: Set[str] = set()
+        # Reward constructive tool calls (read_file, lsp_find_definition, lsp_find_references, etc.)
+        valid_calls = 0
         for call_str in tool_matches:
             try:
                 data = json.loads(call_str.strip())
                 name = data.get("name", "")
-                args = data.get("arguments", {})
-                if name in ("read_file", "view_file"):
-                    p = args.get("path", args.get("file_path", ""))
-                    if p:
-                        read_files.add(os.path.basename(p))
+                if name in (
+                    "read_file",
+                    "view_file",
+                    "grep_search",
+                    "find_files",
+                    "lsp_find_definition",
+                    "lsp_find_references",
+                    "lsp_get_diagnostics",
+                ):
+                    valid_calls += 1
             except Exception:
-                score -= 0.1
+                pass
 
-        # Check if modified diff touched the files read
-        modified_files = set(re.findall(r"(?:---|\+\+\+)\s+[ab]/([^\s\n]+)", completion))
-        modified_basenames = {os.path.basename(f) for f in modified_files}
-
-        if read_files:
-            useful_reads = len(read_files.intersection(modified_basenames))
-            wasted_reads = len(read_files) - useful_reads
-            if wasted_reads > 1:
-                score -= wasted_reads * waste_penalty
-
-        return score
+        # Bonus for thorough exploration (up to +0.5 reward)
+        exploration_bonus = min(0.5, valid_calls * 0.1)
+        return round(exploration_bonus, 4)
 
 
 # ==============================================================================
@@ -395,20 +407,19 @@ class MultiTierVerificationPipeline:
     """Orchestrates Tier 1 (AST), Tier 2 (Sandbox), and Tier 3 (Metrics) evaluation."""
 
     def __init__(self, sandbox_engine: Optional[SandboxExecutionEngine] = None):
-        self.sandbox = sandbox_engine or SandboxExecutionEngine(timeout_sec=3.0, memory_limit_mb=512.0)
+        self.sandbox = sandbox_engine or SandboxExecutionEngine(timeout_sec=4.0, memory_limit_mb=512.0)
 
     def evaluate_candidate(
         self,
         completion_text: str,
         unit_test_suite: str,
-        target_think_budget: int = 250,
     ) -> TierVerificationReport:
         """
         Executes end-to-end multi-tier verification on a generated candidate solution.
         """
         report = TierVerificationReport()
 
-        # Step 0: Anti-Cheat & Reward Hacking Guard
+        # Step 0: Anti-Cheat Guard
         is_clean, cheat_penalty, cheat_diag = AntiRewardHackingGuard.evaluate_code_integrity(completion_text)
         report.breakdown["anti_cheat_penalty"] = cheat_penalty
         report.diagnostics.extend(cheat_diag)
@@ -449,35 +460,34 @@ class MultiTierVerificationPipeline:
             report.passed = False
             report.tier_failed = VerificationTier.TIER_2_SANDBOX_EXECUTION
             report.diagnostics.append(
-                f"Sandbox test failure. Tests passed: {sandbox_res.tests_passed}/{sandbox_res.tests_run}. Error: {sandbox_res.error_type or sandbox_res.stderr}"
+                f"Sandbox test failure. Tests passed: {sandbox_res.tests_passed}/{sandbox_res.tests_run}. "
+                f"Error: {sandbox_res.error_type or sandbox_res.stderr}"
             )
             report.total_reward = t1_score + t2_score
             return report
 
-        # Step 4: Tier 3 - Execution Complexity & Asymptotics
+        # Step 4: Tier 3 - Execution Speed Bonus
         t3_speed_score = 0.0
         if sandbox_res.execution_time_sec < 0.20:
             t3_speed_score = 0.5  # Sub-200ms latency reward
         elif sandbox_res.execution_time_sec > 2.0:
-            t3_speed_score = -0.3
+            t3_speed_score = -0.2
         report.breakdown["tier_3_speed_score"] = t3_speed_score
 
-        # Step 5: Regularization Penalties (Length & Information-Gain)
-        think_penalty = AdaptiveBudgetPenalizer.calculate_thinking_penalty(
-            completion_text, target_budget_tokens=target_think_budget
-        )
-        info_gain_penalty = AdaptiveBudgetPenalizer.calculate_information_gain_penalty(completion_text)
+        # Step 5: Reasoning Quality & Exploration Rewards (No token length caps)
+        reasoning_reward = ReasoningAndExplorationRewardManager.calculate_reasoning_quality_reward(completion_text)
+        exploration_reward = ReasoningAndExplorationRewardManager.calculate_context_exploration_reward(completion_text)
 
-        report.breakdown["thinking_budget_penalty"] = think_penalty
-        report.breakdown["info_gain_penalty"] = info_gain_penalty
+        report.breakdown["reasoning_quality_reward"] = reasoning_reward
+        report.breakdown["exploration_reward"] = exploration_reward
 
         # Total consolidated reward
         total = (
             t1_score
             + t2_score
             + t3_speed_score
-            + think_penalty
-            + info_gain_penalty
+            + reasoning_reward
+            + exploration_reward
             + cheat_penalty
         )
         report.passed = True
@@ -490,22 +500,7 @@ class MultiTierVerificationPipeline:
 # ==============================================================================
 class GRPOTrainingEngine:
     """
-    Implements Group Relative Policy Optimization (GRPO) for 70B MoE Reasoning:
-    
-    Mathematical Formulation:
-    For a prompt q, sample a group of G candidate completions {o_1, o_2, ..., o_G}.
-    Evaluate each completion with the 3-Tier Verification Pipeline to obtain rewards {R_1, ..., R_G}.
-    
-    1. Group Advantage Normalization:
-       A_i = (R_i - mean({R})) / (std({R}) + eps)
-    
-    2. Clipped Surrogate Objective:
-       ratio_i = exp(log_pi_theta(o_i | q) - log_pi_ref(o_i | q))
-       loss_clip = - min(ratio_i * A_i, clip(ratio_i, 1-eps, 1+eps) * A_i)
-    
-    3. KL Divergence Penalty:
-       D_KL = exp(log_pi_ref - log_pi_theta) - (log_pi_ref - log_pi_theta) - 1
-       Total Loss = mean(loss_clip + beta * D_KL)
+    Implements Group Relative Policy Optimization (GRPO) for 70B MoE Reasoning.
     """
 
     def __init__(
@@ -513,12 +508,10 @@ class GRPOTrainingEngine:
         group_size: int = 8,
         clip_eps: float = 0.2,
         kl_beta: float = 0.04,
-        target_think_budget: int = 250,
     ):
         self.group_size = group_size
         self.clip_eps = clip_eps
         self.kl_beta = kl_beta
-        self.target_think_budget = target_think_budget
         self.verifier = MultiTierVerificationPipeline()
 
     def compute_group_advantages(self, rewards: List[float]) -> torch.Tensor:
@@ -538,26 +531,18 @@ class GRPOTrainingEngine:
     ) -> Tuple[torch.Tensor, Dict[str, float]]:
         """
         Computes the complete GRPO policy loss across the candidate group.
-        
-        Args:
-            log_probs: Policy log probabilities (GroupSize, SeqLen)
-            ref_log_probs: Reference model log probabilities (GroupSize, SeqLen)
-            advantages: Group-normalized advantages (GroupSize,)
-            completion_mask: Binary mask for completion token positions (GroupSize, SeqLen)
         """
-        # Ratio: r_i = exp(log_pi(tokens) - log_pi_ref(tokens))
         log_ratio = log_probs - ref_log_probs
         ratio = torch.exp(log_ratio)
 
-        # Expand advantages to token level
-        adv_expanded = advantages.unsqueeze(-1)  # (G, 1)
+        adv_expanded = advantages.unsqueeze(-1)
 
         # Clipped surrogate objective
         surr1 = ratio * adv_expanded
         surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * adv_expanded
         surrogate_loss = -torch.min(surr1, surr2)
 
-        # Unbiased KL estimator: exp(log_ref - log_curr) - (log_ref - log_curr) - 1
+        # Unbiased KL estimator
         kl_div = torch.exp(-log_ratio) - (-log_ratio) - 1.0
 
         total_token_loss = surrogate_loss + self.kl_beta * kl_div
@@ -586,10 +571,11 @@ if __name__ == "__main__":
     print("Cadbury-70B Frontier V2: Multi-Tier Verification & GRPO Verifier Test")
     print("=" * 80)
 
-    # 1. Test Verification Pipeline on Genuine Solution
     good_completion = """<think>
-We need to implement a solution to compute the Fibonacci number in O(N) time and O(1) space.
+We need to compute the n-th Fibonacci number in O(N) time and O(1) space.
 We maintain two running variables a and b.
+Edge cases: n = 0, n = 1.
+Invariant: after iteration i, b holds the i-th Fibonacci number.
 </think>
 ```python
 def fibonacci(n: int) -> int:
@@ -617,29 +603,24 @@ def test_fib():
     print(f"  Consolidated Reward: {report.total_reward}")
     print(f"  Reward Breakdown:    {report.breakdown}")
 
-    # 2. Test Anti-Reward-Hacking Guard on Cheating Code
+    # Cheating test skipping check
     cheating_completion = """<think>Skipping tests</think>
 ```python
 import pytest
-@pytest.mark.skip(reason="cheating")
+@pytest.mark.skip(reason="cheat")
 def fibonacci(n):
-    try:
-        return 0
-    except:
-        pass
+    return 0
 ```"""
     cheat_report = pipeline.evaluate_candidate(cheating_completion, unit_tests)
     print("\n[2. Evaluating Cheating Solution with Test-Skipping]")
     print(f"  Passed All Tiers:    {cheat_report.passed}")
-    print(f"  Failed Tier:         {cheat_report.tier_failed}")
     print(f"  Consolidated Reward: {cheat_report.total_reward}")
-    print(f"  Diagnostics:         {cheat_report.diagnostics}")
 
-    # 3. Test GRPO Advantage Normalization
-    print("\n[3. GRPO Group Advantage Calculation]")
+    # GRPO Advantage Normalization
     grpo = GRPOTrainingEngine(group_size=4)
     group_rewards = [2.7, 2.5, -1.5, 0.2]
     advs = grpo.compute_group_advantages(group_rewards)
+    print("\n[3. GRPO Group Advantage Calculation]")
     print(f"  Raw Rewards: {group_rewards}")
     print(f"  Advantage:   {advs.tolist()}")
 

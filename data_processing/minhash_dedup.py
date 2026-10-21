@@ -8,7 +8,13 @@ import re
 import sys
 import os
 from typing import List, Set, Generator, Dict, Any, Tuple
-from datasketch import MinHash, MinHashLSH
+try:
+    from datasketch import MinHash, MinHashLSH
+    HAS_DATASKETCH = True
+except ImportError:
+    HAS_DATASKETCH = False
+    MinHash = Any  # type: ignore
+    MinHashLSH = Any  # type: ignore
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.logger import setup_logger

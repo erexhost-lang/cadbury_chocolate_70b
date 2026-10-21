@@ -404,7 +404,13 @@ class EntropyGatedTestTimeRouter:
             curr_ids = input_ids
             for _ in range(self.probe_token_count):
                 outputs = model(curr_ids)
-                next_token_logits = outputs.logits[:, -1, :]
+                if isinstance(outputs, tuple):
+                    logits = outputs[0]
+                elif hasattr(outputs, "logits"):
+                    logits = outputs.logits
+                else:
+                    logits = outputs
+                next_token_logits = logits[:, -1, :]
                 ent = self.calculate_shannon_entropy(next_token_logits)
                 entropies.append(ent)
                 next_token = torch.argmax(next_token_logits, dim=-1, keepdim=True)
@@ -426,20 +432,63 @@ class EntropyGatedTestTimeRouter:
             return [f"```python\ndef solve(): pass\n```" for _ in range(count)]
 
         inputs = tokenizer(prompt, return_tensors="pt")
-        device = next(model.parameters()).device
+        device = next(model.parameters()).device if list(model.parameters()) else torch.device("cpu")
         input_ids = inputs["input_ids"].to(device)
 
         rollouts = []
         with torch.no_grad():
             for _ in range(count):
-                output = model.generate(
-                    input_ids,
-                    max_new_tokens=2048,
-                    do_sample=(temperature > 0.0),
-                    temperature=max(0.01, temperature),
-                    top_p=self.top_p,
-                )
-                decoded = tokenizer.decode(output[0], skip_special_tokens=False)
+                if hasattr(model, "generate"):
+                    output = model.generate(
+                        input_ids,
+                        max_new_tokens=2048,
+                        do_sample=(temperature > 0.0),
+                        temperature=max(0.01, temperature),
+                        top_p=self.top_p,
+                    )
+                    gen_ids = output[0].tolist()
+                else:
+                    # Native autoregressive decoding with Cadbury70BMoEModel
+                    curr_ids = input_ids
+                    past_kv = None
+                    gen_tokens = []
+                    B, T_init = input_ids.shape
+                    pos_ids = torch.arange(0, T_init, device=device, dtype=torch.long).unsqueeze(0).expand(B, -1)
+
+                    outputs = model(curr_ids, position_ids=pos_ids)
+                    logits, past_kv, _ = outputs if isinstance(outputs, tuple) else (outputs, None, None)
+                    next_token_logits = logits[:, -1, :]
+
+                    if temperature > 0:
+                        probs = F.softmax(next_token_logits / max(0.01, temperature), dim=-1)
+                        next_tok = torch.multinomial(probs, num_samples=1)
+                    else:
+                        next_tok = torch.argmax(next_token_logits, dim=-1, keepdim=True)
+
+                    gen_tokens.append(next_tok)
+                    curr_pos = T_init
+
+                    for _ in range(512):
+                        step_pos = torch.full((B, 1), curr_pos, device=device, dtype=torch.long)
+                        step_out = model(next_tok, past_key_values=past_kv, position_ids=step_pos)
+                        step_logits, past_kv, _ = step_out if isinstance(step_out, tuple) else (step_out, None, None)
+                        step_next = step_logits[:, -1, :]
+
+                        if temperature > 0:
+                            probs = F.softmax(step_next / max(0.01, temperature), dim=-1)
+                            next_tok = torch.multinomial(probs, num_samples=1)
+                        else:
+                            next_tok = torch.argmax(step_next, dim=-1, keepdim=True)
+
+                        gen_tokens.append(next_tok)
+                        curr_pos += 1
+                        if hasattr(tokenizer, "eos_token_id") and next_tok.item() == tokenizer.eos_token_id:
+                            break
+
+                    all_ids = torch.cat([input_ids, torch.cat(gen_tokens, dim=-1)], dim=-1)
+                    gen_ids = all_ids[0].tolist()
+
+                decoded = tokenizer.decode(gen_ids, skip_special_tokens=False)
                 rollouts.append(decoded)
 
         return rollouts

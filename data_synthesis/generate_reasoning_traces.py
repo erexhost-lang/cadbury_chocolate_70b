@@ -136,16 +136,16 @@ type ResilientService struct {
 	cb *gobreaker.CircuitBreaker
 }
 
-func NewResilientService() *ResilientService {
-	return &ResilientService{
-		cb: gobreaker.NewCircuitBreaker(gobreaker.Settings{
+func NewResilientService() *ResilientService {{
+	return &ResilientService{{
+		cb: gobreaker.NewCircuitBreaker(gobreaker.Settings{{
 			Name:        "{spec.service_name}",
 			MaxRequests: 5,
 			Interval:    10 * time.Second,
 			Timeout:     5 * time.Second,
-		}),
-	}
-}
+		}}),
+	}}
+}}
 ```"""
 
         messages = [
