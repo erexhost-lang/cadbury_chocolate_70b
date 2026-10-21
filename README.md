@@ -1,12 +1,41 @@
 # 🍫 Cadbury-Chocolate 70B Frontier V2 — Sparse MoE, MLA & Verifiable Test-Time Compute
 
-A complete, production-grade distributed training architecture, synthetic reasoning pipeline, compiler-LSP agent framework, and deterministic reinforcement learning system for a **70-Billion parameter code-generation & reasoning language model**. 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Architecture: MoE+MLA](https://img.shields.io/badge/Architecture-Sparse%20MoE%20%2B%20MLA-blue.svg)](model/moe_mla_architecture.py)
+[![Context: 128k](https://img.shields.io/badge/Context%20Window-128k%20Tokens-purple.svg)](configs/model_70b_config.yaml)
+[![Framework: PyTorch FSDP & DeepSpeed](https://img.shields.io/badge/Distributed-FSDP%20%2F%20DeepSpeed%20ZeRO--3-orange.svg)](configs/fsdp_config.yaml)
+[![RLVR: GRPO](https://img.shields.io/badge/Post--Training-GRPO%20%2B%20Verifiable%20Step%20PRMs-green.svg)](training/rl_grpo_verifier.py)
+
+A complete, production-grade distributed training architecture, synthetic reasoning pipeline, compiler-LSP agent framework, and deterministic reinforcement learning system for a **70-Billion parameter code-generation & reasoning language model**.
 
 Modeled after frontier engineering breakthroughs: **DeepSeek-V3 / DeepSeek-Coder-V2**, **Claude 3.5 Sonnet / Opus**, and **OpenAI o1 / DeepSeek-R1**.
 
 ---
 
-## 🏗️ 5-Stage End-to-End Frontier Architecture
+## 📑 Table of Contents
+
+- [🏗️ End-to-End Frontier Architecture](#️-end-to-end-frontier-architecture)
+- [🏛️ Model Specifications & Mathematics](#️-model-specifications--mathematics)
+- [💾 Multi-Head Latent Attention (MLA) & KV Cache Math](#-multi-head-latent-attention-mla--kv-cache-math)
+- [⚖️ Auxiliary-Loss-Free Dynamic Load Balancing](#️-auxiliary-loss-free-dynamic-load-balancing)
+- [🖥️ Hardware Requirements & Feasibility Matrix](#️-hardware-requirements--feasibility-matrix)
+- [⚙️ Environment Setup & Cluster Prerequisites](#️-environment-setup--cluster-prerequisites)
+- [🚀 Step-by-Step Training Guide](#-step-by-step-training-guide)
+  - [Phase 1: Data Collection, Ingestion & Tokenizer Training](#phase-1-data-collection-ingestion--tokenizer-training)
+  - [Phase 2: Continual Pretraining (CPT) on GPU Cluster](#phase-2-continual-pretraining-cpt-on-gpu-cluster)
+  - [Phase 3: Synthetic Trajectories & Compiler LSP Data](#phase-3-synthetic-trajectories--compiler-lsp-data)
+  - [Phase 4: Supervised Fine-Tuning (SFT)](#phase-4-supervised-fine-tuning-sft)
+    - [Option A: Full Multi-Node Cluster SFT](#option-a-full-multi-node-cluster-sft)
+    - [Option B: Single-GPU 4-bit QLoRA Fine-Tuning](#option-b-single-gpu-4-bit-qlora-fine-tuning)
+  - [Phase 5: Reinforcement Learning via GRPO (RLVR)](#phase-5-reinforcement-learning-via-grpo-rlvr)
+  - [Phase 6: Inference & Confidence-Gated Test-Time Compute](#phase-6-inference--confidence-gated-test-time-compute)
+- [🔧 Cluster Optimization & Troubleshooting](#-cluster-optimization--troubleshooting)
+- [📁 Repository Structure](#-repository-structure)
+- [📜 License](#-license)
+
+---
+
+## 🏗️ End-to-End Frontier Architecture
 
 ```mermaid
 flowchart TD
@@ -51,7 +80,7 @@ flowchart TD
 
 ---
 
-## 🏛️ Model Architecture & Mathematics (Frontier V2)
+## 🏛️ Model Specifications & Mathematics
 
 | Hyperparameter | Value | Architectural Purpose |
 | :--- | :--- | :--- |
@@ -71,7 +100,7 @@ flowchart TD
 
 ---
 
-## 💾 Multi-Head Latent Attention (MLA) vs GQA Memory Math
+## 💾 Multi-Head Latent Attention (MLA) & KV Cache Math
 
 Traditional Multi-Head Attention (MHA) and Grouped-Query Attention (GQA) store full-rank Key and Value vectors in GPU VRAM for every token in the context window. At 128k context, this exhausts H100 VRAM.
 
@@ -85,11 +114,9 @@ $$\text{Memory}_{\text{MLA}} = (d_c + d_R) \times n_{\text{layers}} \times 2\tex
 | **GQA (8 KV heads)** | $2 \times 8 \times 128 = \mathbf{2,048\text{ floats}}$ | $\approx \mathbf{10.5\text{ GB}}$ | $\approx \mathbf{42.0\text{ GB}}$ | $8.0\times$ smaller |
 | **Cadbury MLA ($d_c=512, d_R=64$)** | $512 + 64 = \mathbf{576\text{ floats}}$ | $\approx \mathbf{2.9\text{ GB}}$ | $\approx \mathbf{11.8\text{ GB}}$ | **$\approx 28.4\times$ smaller ($\approx 90\%$ vs GQA)** |
 
-Thanks to MLA, Cadbury-70B can maintain a full **128,000 token context window** during inference while reserving over 85% of GPU memory for weights and activations.
-
 ---
 
-## ⚖️ Auxiliary-Loss-Free Load Balancing
+## ⚖️ Auxiliary-Loss-Free Dynamic Load Balancing
 
 Traditional MoE routers use an auxiliary balance loss ($\mathcal{L}_{\text{aux}} = \alpha \sum f_i P_i$) added to the main training loss. This forces the router to route tokens suboptimal for code generation just to balance GPU load, directly damaging code perplexity.
 
@@ -102,64 +129,330 @@ Cadbury-70B Frontier V2 implements **Auxiliary-Loss-Free Balancing**:
 
 ---
 
-## 🛠️ Compiler & Language Server Protocol (LSP) Tools
+## 🖥️ Hardware Requirements & Feasibility Matrix
 
-To eliminate junior agent behaviors (e.g. dumping entire files or running recursive grep searches), Cadbury-70B is trained on compiler-grade LSP agent tools (`data_synthesis/lsp_tools.py`):
+Training a 70B parameter model requires planning across four memory categories:
+- **Model Parameters (bfloat16):** $70.55\text{B} \times 2\text{ bytes} \approx \mathbf{141.1\text{ GB}}$
+- **Gradients (bfloat16):** $70.55\text{B} \times 2\text{ bytes} \approx \mathbf{141.1\text{ GB}}$
+- **Optimizer States (AdamW fp32: master weights + momentum + variance):** $70.55\text{B} \times 8\text{ bytes} \approx \mathbf{564.4\text{ GB}}$
+- **Total Static State:** $\approx \mathbf{846.6\text{ GB}}$ (excluding dynamic activations)
 
-1. **`lsp_find_definition(symbol, context_file, line, character)`:** Jumps directly to symbol declaration across project repositories without grepping.
-2. **`lsp_find_references(symbol, file_path)`:** Identifies all downstream consumers before modifying code to prevent breaking changes.
-3. **`lsp_get_type_signature(symbol, file_path)`:** Retrieves AST type signatures, function parameter definitions, and return contracts.
-4. **`lsp_get_diagnostics(file_path)`:** Runs linter, syntax checker, and compiler error diagnostics to verify patch validity.
+### Hardware Tiers & Supported Phases
+
+```mermaid
+graph LR
+    H1["Single GPU\n1x 80GB (A100/H100)\nor 1x 48GB (RTX 6000)"] -->|"QLoRA 4-bit NF4\nInference & Eval"| T1["Tier 1: Workstation"]
+    H2["Single Node\n8x 80GB (A100/H100)\nNVLink (900 GB/s)"] -->|"Full SFT & GRPO\nZeRO-3 / FSDP"| T2["Tier 2: Node Server"]
+    H3["Multi-Node Cluster\n32x to 64x H100 80GB\nInfiniBand NDR 400G"] -->|"Full Pretraining (CPT)\n128k Long-Context SFT"| T3["Tier 3: Supercomputer"]
+```
+
+| Hardware Setup | Interconnect | Supported Stages | Memory per GPU | Method |
+| :--- | :--- | :--- | :--- | :--- |
+| **Tier 1: Single GPU**<br>1x A100 / H100 (80GB)<br>*(or 1x RTX 6000 Ada 48GB)* | PCIe 4.0 / 5.0 | • 4-bit QLoRA SFT<br>• Synthetic Data Generation<br>• Entropy-Gated Inference Router | $\approx 45\text{--}55\text{ GB}$ total VRAM | `training/train_qlora.py` with BitsAndBytes NF4 + Paged AdamW |
+| **Tier 2: Single Node**<br>8x A100 / H100 (80GB) | NVLink<br>(600–900 GB/s) | • Full-Parameter SFT (bf16)<br>• GRPO Reinforcement Learning<br>• Sequence Packing up to 32k | $\approx 35\text{--}55\text{ GB}$ per GPU | `training/sft_reasoning_trainer.py` & `training/rl_grpo_verifier.py` with FSDP |
+| **Tier 3: Multi-Node Cluster**<br>4–8 Nodes (32–64x H100 80GB) | InfiniBand NDR/HDR<br>(200–400 Gbps) | • Full Pretraining (CPT) from scratch<br>• Full SFT with 128k Context<br>• Multi-node GRPO Policy Optimization | $\approx 26.5\text{ GB}$ static + activations | `training/launch_slurm.sh` or `torchrun` with PyTorch FSDP FULL_SHARD |
 
 ---
 
-## ✂️ Git Diff & PR Evolution Pipeline (`SEARCH/REPLACE`)
+## ⚙️ Environment Setup & Cluster Prerequisites
 
-Cadbury-70B replaces full-file rewriting with surgical Git hunks (`data_processing/git_diff_pipeline.py`). Training data converts GitHub commits and pull requests into strict `SEARCH/REPLACE` blocks:
+### 1. System Requirements & Driver Stack
+- **OS:** Ubuntu 22.04 LTS / RHEL 8 or 9
+- **NVIDIA Driver:** >= 535.104.05
+- **CUDA Toolkit:** >= 12.2
+- **NCCL:** >= 2.18 (compiled with InfiniBand and CUDA-Direct support)
+- **Python:** 3.10, 3.11, or 3.12
 
-```text
-# File: services/auth/jwt_validator.py
-<<<<<<< SEARCH
-def verify_token(token: str) -> bool:
-    payload = jwt.decode(token, SECRET_KEY)
-    return True
-=======
-def verify_token(token: str) -> bool:
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
-        return payload.get("exp", 0) > time.time()
-    except jwt.PyJWTError:
-        return False
->>>>>>> REPLACE
+### 2. Virtual Environment & Dependencies
+Clone the repository and install dependencies inside an isolated environment:
+
+```bash
+git clone https://github.com/erexhost-lang/cadbury_chocolate_70b.git
+cd cadbury_chocolate_70b
+
+# Create and activate Python virtual environment
+python3 -m venv cadbury-env
+source cadbury-env/bin/activate
+
+# Upgrade packaging tools
+pip install --upgrade pip setuptools wheel
+
+# Install PyTorch with native CUDA 12.2+ build
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Install repository dependencies
+pip install -r requirements.txt
+
+# Compile FlashAttention-2 (Required for Ampere/Hopper GPUs)
+pip install flash-attn --no-build-isolation
+```
+
+### 3. Recommended Cluster Environment Variables
+Add these flags to your `.bashrc` or cluster launch scripts to guarantee peak NCCL throughput and avoid memory fragmentation:
+
+```bash
+# Optimize PyTorch CUDA Memory Allocator against OOM fragmentation
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+# High-Performance InfiniBand NCCL Settings
+export NCCL_DEBUG=INFO
+export NCCL_IB_DISABLE=0
+export NCCL_IB_HCA=mlx5
+export NCCL_IB_GID_INDEX=3
+export NCCL_NET_GDR_LEVEL=3
+export NCCL_BUFFSIZE=16777216
+export NCCL_CROSS_NIC=1
+
+# Enable unbuffered stream logs
+export PYTHONUNBUFFERED=1
 ```
 
 ---
 
-## 🎯 Deterministic Verifiable Step Rewards (Correction #4)
+## 🚀 Step-by-Step Training Guide
 
-Neural Process Reward Models (PRMs) are computationally expensive and prone to reward hacking (adversarial tokens triggering artificially inflated intermediate scores). Cadbury-70B replaces neural PRMs with **Deterministic Verifiable Step Rewards** in `training/rl_grpo_verifier.py`:
-
-- **Surgical LSP Navigation Reward:** Rewarded ($+0.5$) when localizing bugs within $\le 2$ hops. Penalized ($-0.3$) for $>3$ unnecessary hops.
-- **Syntactic Diff Verification:** Parses `SEARCH/REPLACE` blocks with Python AST; syntax errors receive a $-1.0$ penalty.
-- **Diagnostic Cleanliness:** Using `lsp_get_diagnostics` to verify 0 syntax/linter errors receives a $+0.5$ bonus.
-- **Functional Execution:** Unit test pass rates verified inside isolated execution sandboxes with strict time and memory bounds.
+Follow these sequential phases to train Cadbury-70B from raw data to an aligned frontier reasoning agent.
 
 ---
 
-## ⚡ Entropy-Gated Best-of-N Test-Time Compute (Correction #5)
+### Phase 1: Data Collection, Ingestion & Tokenizer Training
 
-Running full Monte Carlo Tree Search (MCTS) or unconditional Best-of-N on every query introduces extreme latency and rumination on simple tasks. Cadbury-70B implements **Confidence-Gated Sandbox Routing** (`inference/test_time_router.py`):
+Before training, prepare raw code repositories, deduplicate tokens, and train the specialized Byte-Level BPE tokenizer.
 
-1. **Entropy Probe:** During generation of the initial reasoning prefix, the router calculates predictive Shannon entropy:
-   $$H(p) = -\sum_{v \in V} p(v) \log_2 p(v)$$
-2. **Fast Single-Pass Path ($H < 0.55$):**
-   - For straightforward syntax, algorithms, or boilerplate tasks, the model exhibits low entropy.
-   - Routes immediately to single-pass greedy decoding ($N=1$). Zero latency overhead.
-3. **Parallel Best-of-N Sandbox Search ($H \ge 0.55$):**
-   - For ambiguous bugs, race conditions, or complex multi-file architectural refactors, entropy spikes.
-   - Spawns $N=4$ parallel rollouts with exploratory sampling temperature ($\tau = 0.7$).
-   - Evaluates each rollout against AST parsing and isolated unit test execution.
-   - Selects the winning solution deterministically: **Passing unit tests > AST validity > Minimal diff footprint**.
+#### 1. Ingest Raw Code via Streaming (Zero Disk Waste)
+Fetch and stream raw multi-language datasets directly from Hugging Face:
+```bash
+python data_collection/stream_hf_code.py \
+    --dataset-name "bigcode/the-stack-v2" \
+    --output-dir "data/raw/the_stack" \
+    --max-samples 500000
+```
+
+#### 2. Clean, Scrub Secrets & Deduplicate
+Run AST validation, scrub API tokens/cryptographic keys, and apply MinHash near-deduplication ($0.85$ Jaccard threshold):
+```bash
+# Syntax and PII scrubbing
+python data_processing/secret_scrubber.py \
+    --input-file "data/raw/the_stack/samples.jsonl" \
+    --output-file "data/processed/clean_samples.jsonl"
+
+# MinHash LSH deduplication
+python data_processing/minhash_dedup.py \
+    --input-file "data/processed/clean_samples.jsonl" \
+    --output-file "data/processed/deduped_samples.jsonl"
+```
+
+#### 3. Train Byte-Level BPE Tokenizer
+Train the 128,270 vocabulary tokenizer with dedicated reasoning XML tags (`<think>`, `<hypothesis>`, `<tool_call>`, `<tool_output>`) and FIM control tokens:
+```bash
+python tokenization/train_code_tokenizer.py \
+    --data-path "data/processed/deduped_samples.jsonl" \
+    --vocab-size 128270 \
+    --output-dir "tokenization/cadbury_tokenizer"
+```
+
+#### 4. Topologically Pack Repositories with FIM
+Pack multi-file repositories using dependency DAGs and 50% Fill-In-The-Middle (PSM/SPM):
+```bash
+python data_processing/repo_packer_fim.py \
+    --input-dir "data/processed/deduped_samples.jsonl" \
+    --output-dir "data/processed/packed_128k" \
+    --max-seq-len 131072
+```
+
+---
+
+### Phase 2: Continual Pretraining (CPT) on GPU Cluster
+
+Pretraining requires a multi-node cluster (e.g. 4 nodes $\times$ 8 H100 GPUs).
+
+#### Option 1: Launch via SLURM Cluster Workload Manager
+Submit the production job script [`training/launch_slurm.sh`](training/launch_slurm.sh):
+```bash
+sbatch training/launch_slurm.sh
+```
+
+Inspect live training logs:
+```bash
+tail -f logs/cadbury_70b_*.out
+```
+
+#### Option 2: Launch via Bare-Metal `torchrun` across 4 Nodes
+Execute on Node 0 (Master Node `10.0.0.1`):
+```bash
+torchrun \
+    --nnodes=4 \
+    --nproc_per_node=8 \
+    --node_rank=0 \
+    --master_addr="10.0.0.1" \
+    --master_port=29500 \
+    training/pretrain_fsdp.py \
+    --config-path "configs/fsdp_config.yaml" \
+    --model-config "configs/model_70b_config.yaml" \
+    --data-path "data/processed/packed_128k" \
+    --output-dir "checkpoints/cadbury-70b-cpt" \
+    --max-seq-len 131072 \
+    --batch-size-per-gpu 1 \
+    --grad-accum 8 \
+    --lr 1.5e-4
+```
+*(Repeat on Nodes 1, 2, and 3, setting `--node_rank=1`, `--node_rank=2`, and `--node_rank=3` respectively).*
+
+---
+
+### Phase 3: Synthetic Trajectories & Compiler LSP Data
+
+Transform software evolution trajectories and synthetic algorithmic reasoning tasks into SFT format.
+
+#### 1. Generate Synthetic CoT & Bayesian Trajectories
+Produces structured ChatML data with anti-rumination pruning and hypothesis ranking:
+```bash
+python data_synthesis/generate_reasoning_traces.py \
+    --num-samples 50000 \
+    --output-file "data/processed/sft_reasoning/synthetic_traces.jsonl"
+```
+
+#### 2. Format Git Commits & PRs into `SEARCH/REPLACE` Diffs
+Extracts real pull request evolution into surgical diff hunks:
+```bash
+python data_processing/git_diff_pipeline.py \
+    --commits-input "data/raw/git_commits.jsonl" \
+    --output-file "data/processed/sft_reasoning/git_diff_traces.jsonl"
+```
+
+---
+
+### Phase 4: Supervised Fine-Tuning (SFT)
+
+Choose your training route depending on your hardware availability:
+
+#### Option A: Full Multi-Node Cluster SFT (4 Nodes $\times$ 8 GPUs)
+Uses Completion-Only Masking, NEFTune embedding noise ($\alpha = 5.0$), and full 128k context:
+```bash
+torchrun \
+    --nnodes=4 \
+    --nproc_per_node=8 \
+    --rdzv_id=cadbury_sft \
+    --rdzv_backend=c10d \
+    --rdzv_endpoint=master-node:29500 \
+    training/sft_reasoning_trainer.py \
+    --model-path "checkpoints/cadbury-70b-cpt" \
+    --data-file "data/processed/sft_reasoning/synthetic_traces.jsonl" \
+    --output-dir "checkpoints/cadbury-70b-sft" \
+    --neftune-alpha 5.0 \
+    --max-seq-len 131072 \
+    --lr 2e-5 \
+    --epochs 3
+```
+
+#### Option B: Single-GPU 4-bit QLoRA Fine-Tuning (1x 80GB A100/H100)
+For researchers running on a single 80GB GPU or workstation:
+```bash
+python training/train_qlora.py \
+    --model-name-or-path "meta-llama/Meta-Llama-3-70B" \
+    --data-file "data/processed/sft_reasoning/sample_reasoning_data.jsonl" \
+    --output-dir "checkpoints/cadbury-70b-qlora" \
+    --lora-r 64 \
+    --lora-alpha 128 \
+    --lora-dropout 0.05 \
+    --batch-size 1 \
+    --grad-accum 16 \
+    --lr 2e-4 \
+    --epochs 3
+```
+
+---
+
+### Phase 5: Reinforcement Learning via GRPO (RLVR)
+
+Post-SFT alignment uses **Group Relative Policy Optimization (GRPO)** with **Deterministic Verifiable Step Rewards** (no unstable neural PRMs):
+
+Launch on an 8-GPU node:
+```bash
+torchrun --nproc_per_node=8 training/rl_grpo_verifier.py \
+    --model-path "checkpoints/cadbury-70b-sft" \
+    --output-dir "checkpoints/cadbury-70b-aligned" \
+    --num-generations 8 \
+    --max-prompt-length 4096 \
+    --max-completion-length 8192 \
+    --learning-rate 5e-7 \
+    --beta 0.04
+```
+
+During training, candidate rollouts are evaluated against 6 deterministic verifiable reward functions:
+1. `format_reward_fn`: Strict XML tags (`<think>`, `<hypothesis>`, `<tool_call>`).
+2. `syntax_and_ast_reward_fn`: Python AST validity on generated code and patches.
+3. `execution_sandbox_reward_fn`: Functional test correctness in isolated subprocesses.
+4. `adaptive_thinking_budget_reward_fn`: Length penalty rewarding concise reasoning traces.
+5. `anti_reward_hacking_fn`: Catches test-skipping cheats and hardcoded returns.
+6. `verifiable_process_reward_fn`: Scores $\le 2$-hop LSP navigation and zero linter diagnostics.
+
+---
+
+### Phase 6: Inference & Confidence-Gated Test-Time Compute
+
+Deploy the model with the **Confidence-Gated Best-of-N Sandbox Router** to achieve fast decoding on simple queries and deep verification on complex queries:
+
+```bash
+python inference/test_time_router.py
+```
+
+#### Python API Usage:
+```python
+from inference.test_time_router import EntropyGatedTestTimeRouter
+
+router = EntropyGatedTestTimeRouter(
+    entropy_threshold=0.55,  # Threshold separating fast vs best-of-N paths
+    num_candidates=4,         # Parallel rollouts when entropy is high
+    sandbox_timeout_sec=4.0,  # Execution timeout
+)
+
+prompt = "Fix the race condition in this token-bucket rate limiter."
+unit_tests = """
+limiter = TokenBucket(capacity=2, refill_rate=10.0)
+assert limiter.consume(1) is True
+assert limiter.consume(1) is True
+assert limiter.consume(1) is False
+"""
+
+# The router inspects reasoning entropy and dynamically allocates test-time compute
+best_result, metadata, all_candidates = router.route_and_generate(
+    prompt=prompt,
+    unit_tests=unit_tests,
+    model=model,
+    tokenizer=tokenizer,
+)
+
+print(f"Routing Decision: {metadata.decision.value}")  # 'fast_single_pass' or 'parallel_best_of_n'
+print(f"Winning Code:\n{best_result.extracted_code}")
+```
+
+---
+
+## 🔧 Cluster Optimization & Troubleshooting
+
+### 1. CUDA Out of Memory (OOM) Checklist
+- **Enable Expandable Segments:** Ensure `export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is set before invoking Python.
+- **Enable Activation Checkpointing:** In `configs/fsdp_config.yaml`, ensure `fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer` is active to discard and recompute intermediate activations during backward pass.
+- **Micro-Batch Sizing:** Reduce `--batch-size-per-gpu` to `1` and scale up `--grad-accum` (gradient accumulation steps) to maintain your desired global batch size.
+
+### 2. Resolving NCCL Timeouts on InfiniBand
+If multi-node training hangs during all-gather or backward reduction:
+```bash
+export NCCL_DEBUG=WARN
+export NCCL_TIMEOUT=1800  # Increase timeout to 30 minutes for large-scale syncs
+export NCCL_IB_DISABLE=0
+export NCCL_NET_GDR_LEVEL=3
+```
+Ensure firewall ports between nodes are open on port range `29500-29550`.
+
+### 3. Preventing Loss Spikes & NaN Gradients
+- Use **bfloat16 mixed precision** exclusively (never fp16 for 70B, as fp16 has only a 5-bit exponent and suffers from frequent underflows/overflows).
+- Apply gradient norm clipping at `1.0`:
+  ```python
+  torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+  ```
+- Use a cosine learning rate scheduler with at least **2,000 warm-up steps**.
 
 ---
 
@@ -189,7 +482,7 @@ cadbury-chocolate/
 │   └── lsp_tools.py              # Compiler LSP tools (definition, references, diagnostics, types)
 ├── inference/
 │   ├── __init__.py               # Inference module exports
-│   └── test_time_router.py       # Confidence-Gated Best-of-N Sandbox Router (Correction #5)
+│   └── test_time_router.py       # Confidence-Gated Best-of-N Sandbox Router
 ├── model/
 │   ├── __init__.py               # Model exports (MLA, MoE, Router, Cadbury70BMoEModel)
 │   └── moe_mla_architecture.py   # Multi-Head Latent Attention & Sparse MoE PyTorch modules
@@ -208,50 +501,6 @@ cadbury-chocolate/
 │   └── memory_tracker.py         # VRAM allocation and peak usage profiler
 ├── requirements.txt              # Production cluster dependencies
 └── README.md
-```
-
----
-
-## 🚀 Execution & Verification Commands
-
-### 1. Test Confidence-Gated Best-of-N Test-Time Compute Router
-```bash
-python inference/test_time_router.py
-```
-
-### 2. Verify MoE + Multi-Head Latent Attention (MLA) Architecture
-```bash
-python model/moe_mla_architecture.py
-```
-
-### 3. Verify Compiler LSP Agent Navigation Tools
-```bash
-python data_synthesis/lsp_tools.py
-```
-
-### 4. Verify Git Diff `SEARCH/REPLACE` Pipeline
-```bash
-python data_processing/git_diff_pipeline.py
-```
-
-### 5. Launch Multi-Node Masked SFT with NEFTune
-```bash
-torchrun \
-    --nnodes=4 \
-    --nproc_per_node=8 \
-    --rdzv_id=cadbury_sft \
-    --rdzv_backend=c10d \
-    --rdzv_endpoint=master-node:29500 \
-    training/sft_reasoning_trainer.py \
-    --model-path "checkpoints/cadbury-70b-moe" \
-    --data-file "data/processed/sft_reasoning/sample_reasoning_data.jsonl" \
-    --neftune-alpha 5.0 \
-    --max-seq-len 131072
-```
-
-### 6. Run GRPO with Deterministic Step Rewards
-```bash
-torchrun --nproc_per_node=8 training/rl_grpo_verifier.py
 ```
 
 ---
