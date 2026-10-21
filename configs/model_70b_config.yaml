@@ -101,3 +101,23 @@ rl_efficiency_penalties:
   thinking_token_penalty_weight: 0.0005
   optimal_think_budget: 150
   anti_hacking_penalty: 3.0
+
+# ==============================================================================
+# Google Cloud TPU Pod & OpenXLA Sharding Configuration
+# ==============================================================================
+tpu:
+  tpu_enabled: true
+  platform: "tpu_v5p"                   # Supports tpu_v5e, tpu_v5p, tpu_v6e (Trillium)
+  xla_fusion: true                      # Fuses RMSNorm, SwiGLU, and RoPE in XLA HLO
+  backend: "openxla"
+  downcast_bf16: true
+  mesh_shape: [2, 8, 2]                 # 3D Mesh: (data_parallel=2, expert_parallel=8, tensor_parallel=2) = 32 chips
+  data_parallel_degree: 2
+  expert_parallel_degree: 8             # 16 MoE routed experts mapped onto 8-way expert mesh
+  tensor_parallel_degree: 2             # MLA attention heads and projections split across 2-way TP
+  ici_bandwidth_gbps: 4800.0            # 4.8 Tbps 3D Torus Inter-Chip Interconnect
+  dci_bandwidth_gbps: 400.0             # Data Center Interconnect
+  hbm_per_chip_gb: 95.0                 # 95 GB HBM per TPU v5p chip
+  static_buckets: [128, 512, 2048, 8192, 32768, 131072] # Prevents XLA compilation thrashing
+  fp8_checkpointing: true               # FP8 E4M3/E5M2 sharded weights across cloud storage
+

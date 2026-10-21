@@ -6,6 +6,11 @@ from .test_time_router import (
     IsolatedCodeSandbox,
     EntropyGatedTestTimeRouter,
 )
+from .tpu_inference import (
+    TPUInferenceConfig,
+    TPUInferenceEngine,
+    GenerationBenchmarkResult,
+)
 
 __all__ = [
     "RoutingDecision",
@@ -13,4 +18,8 @@ __all__ = [
     "RoutingMetadata",
     "IsolatedCodeSandbox",
     "EntropyGatedTestTimeRouter",
+    "TPUInferenceConfig",
+    "TPUInferenceEngine",
+    "GenerationBenchmarkResult",
 ]
+

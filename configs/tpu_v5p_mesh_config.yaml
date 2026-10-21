@@ -1,0 +1,58 @@
+# ==============================================================================
+# Google Cloud TPU v5p / v6e Pod Mesh & OpenXLA Sharding Configuration
+# ==============================================================================
+# Target Hardware: TPU v5p Pod Slice (32 to 128 Chips) or TPU v6e Trillium
+# Interconnect: 4.8 Tbps 3D Torus Inter-Chip Interconnect (ICI)
+# Memory: 95 GB HBM per chip (3,040 GB aggregate across 32 chips)
+#
+# 3D Mesh Partitioning: (data, expert, model) -> (DP, EP, TP)
+#   - Data Parallel (DP): 2 (tokens split across batch dimension)
+#   - Expert Parallel (EP): 8 (16 routed experts distributed across 8 chips = 2 experts/chip)
+#   - Tensor / Model Parallel (TP): 2 (MLA attention heads split across 2 chips)
+#   - Total Chips = 2 * 8 * 2 = 32 TPU chips
+# ==============================================================================
+
+compute_environment: GOOGLE_CLOUD_TPU
+platform: "tpu_v5p"
+pjrt_device: "TPU"
+
+# Hardware Topology & Mesh
+mesh:
+  shape: [2, 8, 2]                      # (DP, EP, TP)
+  axis_names: ["data", "expert", "model"]
+  total_chips: 32
+  ici_bandwidth_gbps: 4800.0
+  dci_bandwidth_gbps: 400.0
+  hbm_per_chip_gb: 95.0
+
+# OpenXLA Compilation & Kernel Fusion
+openxla:
+  backend: "openxla"
+  fusion: true
+  downcast_bf16: true
+  enable_megacore: true
+  latency_hiding_scheduler: true
+  windowed_einsum_threshold_mib: 512
+  static_buckets:
+    - 128
+    - 512
+    - 2048
+    - 8192
+    - 32768
+    - 131072
+
+# Multi-Head Latent Attention (MLA) TPU Buffer Layout
+mla_cache:
+  kv_lora_rank: 512                     # d_c = 512 (aligned to 128-byte memory lanes)
+  qk_rope_head_dim: 64                  # d_R = 64 (aligned to 128-byte memory lanes)
+  contiguous_allocation: true
+  max_context_window: 131072
+
+# High-Precision Cloud Distributed Checkpointing
+checkpointing:
+  format: "sharded_tpu"
+  storage_backend: "gcs"                # "gcs" or "nfs"
+  bucket_path: "gs://cadbury-checkpoints-us-central1/70b_moe_mla"
+  precision: "fp8_e4m3"                 # "bfloat16" or "fp8_e4m3"
+  save_async: true
+  num_shards: 32
