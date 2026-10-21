@@ -5,6 +5,8 @@ from .moe_mla_architecture import (
     MultiHeadLatentAttention,
     AuxiliaryLossFreeRouter,
     SparseMoELayer,
+    SwiGLUExpert,
+    OverlappedAllToAllMoEDispatcher,
     CadburyMoEBlock,
     Cadbury70BMoEModel,
 )
@@ -21,6 +23,8 @@ __all__ = [
     "MultiHeadLatentAttention",
     "AuxiliaryLossFreeRouter",
     "SparseMoELayer",
+    "SwiGLUExpert",
+    "OverlappedAllToAllMoEDispatcher",
     "CadburyMoEBlock",
     "Cadbury70BMoEModel",
     "MoERoutingConfig",

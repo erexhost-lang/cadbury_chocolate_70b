@@ -4,9 +4,9 @@
 [![Architecture: MoE+MLA](https://img.shields.io/badge/Architecture-Sparse%20MoE%20%2B%20MLA-blue.svg)](model/moe_mla_architecture.py)
 [![Context: 128k](https://img.shields.io/badge/Context%20Window-128k%20Tokens-purple.svg)](configs/model_70b_config.yaml)
 [![Tokens: 3.0T-5.5T](https://img.shields.io/badge/Pretraining%20Scale-3.0T%20--%205.5T%20Tokens-red.svg)](configs/training_scale_config.yaml)
-[![Hardware: TPU Pods](https://img.shields.io/badge/Google%20Cloud-TPU%20v5p%20%2F%20v6e-green.svg)](configs/tpu_v5p_mesh_config.yaml)
-[![Framework: PyTorch FSDP & DeepSpeed](https://img.shields.io/badge/Distributed-FSDP%20%2F%20DeepSpeed%20ZeRO--3-orange.svg)](configs/fsdp_config.yaml)
-[![RLVR: GRPO](https://img.shields.io/badge/Post--Training-GRPO%20%2B%20Verifiable%20Step%20PRMs-green.svg)](training/rl_grpo_verifier.py)
+[![Hardware: Multi-GPU & TPU](https://img.shields.io/badge/Hardware-32x%20H100%20%2F%20TPU%20v5p-green.svg)](hardware/distributed_sharding.py)
+[![Framework: PyTorch FSDP & DeepSpeed](https://img.shields.io/badge/Distributed-FSDP%20%2F%20ZeRO--3%20%2B%20FP8-orange.svg)](hardware/distributed_sharding.py)
+[![RLVR: GRPO](https://img.shields.io/badge/Post--Training-GRPO%20%2B%203--Tier%20Verifier-green.svg)](training/rl_grpo_verifier.py)
 
 A complete, production-grade distributed training architecture, synthetic reasoning pipeline, compiler-LSP agent framework, and deterministic reinforcement learning system for a **70-Billion parameter code-generation & reasoning language model**.
 
@@ -17,31 +17,26 @@ Modeled after frontier engineering breakthroughs: **DeepSeek-V3 / DeepSeek-Coder
 ## 📑 Table of Contents
 
 - [🏗️ End-to-End Frontier Architecture](#️-end-to-end-frontier-architecture)
-- [🏛️ Model Specifications & Mathematics](#️-model-specifications--mathematics)
-- [💾 Multi-Head Latent Attention (MLA) & KV Cache Math](#-multi-head-latent-attention-mla--kv-cache-math)
-- [⚖️ Auxiliary-Loss-Free Dynamic Load Balancing](#️-auxiliary-loss-free-dynamic-load-balancing)
+- [🏛️ Model Specifications & Mathematical Foundation](#️-model-specifications--mathematical-foundation)
+- [💾 Multi-Head Latent Attention (MLA) & KV Cache Compression](#-multi-head-latent-attention-mla--kv-cache-compression)
+- [⚖️ Fine-Grained MoE, Overlapped Comm & Router Watchdog](#️-fine-grained-moe-overlapped-comm--router-watchdog)
+  - [1. 16 Routed + 2 Shared Experts (Top-2 Gating)](#1-16-routed--2-shared-experts-top-2-gating)
+  - [2. Auxiliary-Loss-Free Router with Dynamic EMA Biasing](#2-auxiliary-loss-free-router-with-dynamic-ema-biasing)
+  - [3. Automated Fallback Watchdog (25% CV Trigger)](#3-automated-fallback-watchdog-25-cv-trigger)
+  - [4. Asynchronous Overlapped All-to-All Collectives](#4-asynchronous-overlapped-all-to-all-collectives)
+- [🖥️ Distributed Memory Mathematics & VRAM Sharding](#️-distributed-memory-mathematics--vram-sharding)
+  - [1. Analytical Memory Formulas (ZeRO-3 / FSDP FULL_SHARD)](#1-analytical-memory-formulas-zero-3--fsdp-full_shard)
+  - [2. Cluster Hardware Feasibility & Precision Comparison Matrix](#2-cluster-hardware-feasibility--precision-comparison-matrix)
+  - [3. Hybrid 3D DeviceMesh Mapping (DP x EP x TP)](#3-hybrid-3d-devicemesh-mapping-dp-x-ep-x-tp)
+- [🧪 Multi-Tier Execution Sandbox & GRPO Policy Verifier](#-multi-tier-execution-sandbox--grpo-policy-verifier)
+  - [1. The 3-Tier Verification Pipeline](#1-the-3-tier-verification-pipeline)
+  - [2. Anti-Reward-Hacking & Anti-Cheat Guards](#2-anti-reward-hacking--anti-cheat-guards)
+  - [3. Length & Information-Gain Regularized GRPO Equations](#3-length--information-gain-regularized-grpo-equations)
+- [⚡ Dynamic Length-Stratified Bucketing Sampler](#-dynamic-length-stratified-bucketing-sampler)
+  - [1. Zero-Recompilation Guarantee for OpenXLA & PyTorch](#1-zero-recompilation-guarantee-for-openxla--pytorch)
+  - [2. Constant-Token Micro-Batch Scaling](#2-constant-token-micro-batch-scaling)
 - [📊 Pre-Training Data Strategy & MoE Scaling Laws (3.0T – 5.5T Tokens)](#-pre-training-data-strategy--moe-scaling-laws-30t--55t-tokens)
-  - [1. Chinchilla MoE Scaling & The Active Parameter Principle](#1-chinchilla-moe-scaling--the-active-parameter-principle)
-  - [2. Multi-Domain Data Mixing Ratios (60% Code / 40% Reasoning Prose)](#2-multi-domain-data-mixing-ratios-60-code--40-reasoning-prose)
-  - [3. Preventing Expert Starvation via 16-Expert Domain Segmentation](#3-preventing-expert-starvation-via-16-expert-domain-segmentation)
-  - [4. Dynamic Bias Decay Schedule ($\gamma(t)$) Across 4 Trillion Tokens](#4-dynamic-bias-decay-schedule-gammat-across-4-trillion-tokens)
-- [🖥️ Hardware Requirements & Feasibility Matrix](#️-hardware-requirements--feasibility-matrix)
-- [☁️ Google Cloud TPU Pod Deployment Guide (v5e / v5p / v6e Trillium)](#️-google-cloud-tpu-pod-deployment-guide-v5e--v5p--v6e-trillium)
-  - [1. 3D SPMD / Pjit Mesh Sharding Architecture](#1-3d-spmd--pjit-mesh-sharding-architecture)
-  - [2. High-Precision Cloud Distributed Checkpointing (GCS + FP8)](#2-high-precision-cloud-distributed-checkpointing-gcs--fp8)
-  - [3. Universal HF / Megatron to Cadbury MoE+MLA Conversion](#3-universal-hf--megatron-to-cadbury-moemla-conversion)
-  - [4. High-Throughput TPU Serving with Persistent XLA Graph Cache](#4-high-throughput-tpu-serving-with-persistent-xla-graph-cache)
-- [⚙️ Environment Setup & Cluster Prerequisites](#️-environment-setup--cluster-prerequisites)
-- [🚀 Step-by-Step Training Guide](#-step-by-step-training-guide)
-  - [Phase 1: Data Collection, Ingestion & Tokenizer Training](#phase-1-data-collection-ingestion--tokenizer-training)
-  - [Phase 2: Continual Pretraining (CPT) on GPU Cluster](#phase-2-continual-pretraining-cpt-on-gpu-cluster)
-  - [Phase 3: Synthetic Trajectories & Compiler LSP Data](#phase-3-synthetic-trajectories--compiler-lsp-data)
-  - [Phase 4: Supervised Fine-Tuning (SFT)](#phase-4-supervised-fine-tuning-sft)
-    - [Option A: Full Multi-Node Cluster SFT](#option-a-full-multi-node-cluster-sft)
-    - [Option B: Single-GPU 4-bit QLoRA Fine-Tuning](#option-b-single-gpu-4-bit-qlora-fine-tuning)
-  - [Phase 5: Reinforcement Learning via GRPO (RLVR)](#phase-5-reinforcement-learning-via-grpo-rlvr)
-  - [Phase 6: Inference & Confidence-Gated Test-Time Compute](#phase-6-inference--confidence-gated-test-time-compute)
-- [🔧 Cluster Optimization & Troubleshooting](#-cluster-optimization--troubleshooting)
+- [☁️ Google Cloud TPU Pod Deployment Guide (v5p / v6e Trillium)](#️-google-cloud-tpu-pod-deployment-guide-v5p--v6e-trillium)
 - [📁 Repository Structure](#-repository-structure)
 - [📜 License](#-license)
 
@@ -51,40 +46,39 @@ Modeled after frontier engineering breakthroughs: **DeepSeek-V3 / DeepSeek-Coder
 
 ```mermaid
 flowchart TD
-    subgraph Stage1["Stage 1: Multi-Source Pretraining (CPT) & Sparse MoE"]
-        A1["Multi-Domain Streams (3.0T - 5.5T Tokens)\n(60% Code / 40% Reasoning Prose)"] --> A2["AST Import Parsing &\nTopological Repo DAG"]
-        A2 --> A3["Fill-In-The-Middle (FIM)\n(50% PSM / SPM)"]
-        A3 --> A4["Zero-Waste Sequence Packing\n(128k Context Tokens)"]
-        A4 --> A5["DeepSeek-V3 Sparse MoE + MLA\n(16 Routed + 2 Shared Experts, Top-2 Active)\n(Auxiliary-Loss-Free Dynamic Bias)"]
+    subgraph Stage1["Stage 1: Dynamic Data Bucketing & Multi-Source Pretraining (3.0T - 5.5T)"]
+        A1["Multi-Domain Streams (60% Code / 40% Reasoning)\n(GitHub Repos, PR Diffs, CS Literature, Math Logic)"] --> A2["Length-Stratified Bucket Sampler\n[2048, 8192, 32768, 131072]\n(0 Recompilations, Constant-Token Batches)"]
+        A2 --> A3["AST Import Parsing & FIM Slicing\n(50% PSM / SPM Formatting)"]
+        A3 --> A4["DeepSeek-V3 MoE + MLA Core\n(16 Routed + 2 Shared Experts, Top-2 Active)\n(Low-Rank KV d_c=512, Decoupled RoPE d_R=64)"]
+        A4 --> A5["Distributed Memory Sharding\n(PyTorch FSDP / DeepSpeed ZeRO-3 / FP8 Hybrid TE)"]
     end
 
-    subgraph Stage2["Stage 2: Synthetic Agentic & Software Evolution Data"]
-        B1["System Design & DSA Tracks\n(High RPS, SPOF, Big-O Proofs)"]
-        B2["Git Diff & PR Evolution\n(SEARCH/REPLACE Patch Format)"]
+    subgraph Stage2["Stage 2: Synthetic Reasoning & Software Evolution"]
+        B1["System Design & DSA Tracks\n(High RPS, SPOF, Big-O Complexity Proofs)"]
+        B2["Git Diff & PR Evolution\n(SEARCH/REPLACE Surgical Blocks)"]
         B3["Compiler LSP Agent Navigation\n(find_definition, references, diagnostics)"]
-        B1 & B2 & B3 --> B4["Anti-Rumination Sanitizer\n(Prunes circular self-doubt loops)"]
+        B1 & B2 & B3 --> B4["Anti-Rumination Filter\n(Prunes circular self-doubt loops)"]
         B4 --> B5["Structured ChatML JSONL\n(<think>, <hypothesis>, <tool_call>)"]
     end
 
     subgraph Stage3["Stage 3: Masked SFT with NEFTune & MLA Caching"]
         B5 --> C1["Completion-Only Collator\n(Masks prompt & tool_output to -100)"]
         C1 --> C2["NEFTune Regularization\n(Noisy Embeddings alpha=5.0)"]
-        C2 --> C3["MLA KV Cache Compression\n(d_c = 512, d_R = 64, 128k Context)"]
-        A5 -. Base Weights .-> C3
+        C2 --> C3["MLA KV Cache Compression\n(576 floats/token vs 16,384 MHA)"]
+        A5 -. Checkpoint Base Weights .-> C3
     end
 
-    subgraph Stage4["Stage 4: GRPO with Verifiable Process Rewards (RLVR)"]
+    subgraph Stage4["Stage 4: GRPO with Multi-Tier Verifiable Process Rewards (RLVR)"]
         C3 --> D1["GRPO Policy Optimization\n(Group Advantage A_i = (R_i - mean)/std)"]
-        D1 --> R1["Deterministic Process Rewards\n(LSP hop count <= 2, clean diagnostics)"]
-        D1 --> R2["AST Syntax & Diff Reward\n(SEARCH/REPLACE compilation)"]
-        D1 --> R3["Isolated Sandbox Execution\n(Unit Test Pass & Big-O Speed)"]
-        D1 --> R4["Length-Penalized Budget\n(-lambda * excess thought tokens)"]
-        D1 --> R5["Anti-Reward-Hacking Guardrail\n(Catches test skips & hardcoded cheats)"]
-        R1 & R2 & R3 & R4 & R5 --> D2["Frontier Aligned 70B MoE Weights"]
+        D1 --> T1["Tier 1: Static AST & Compiler Diagnostics\n(ast.parse, syntax errors, undefined names)"]
+        D1 --> T2["Tier 2: Subprocess / Docker Sandbox\n(pytest execution, strict cgroup memory/time limits)"]
+        D1 --> T3["Tier 3: Execution Metrics & Anti-Cheat\n(Sub-200ms latency, anti-pytest.mark.skip, bare except)"]
+        D1 --> T4["Regularization Penalties\n(-lambda_len * thought tokens, -lambda_tool * wasted reads)"]
+        T1 & T2 & T3 & T4 --> D2["Cadbury-70B Aligned Weights"]
     end
 
     subgraph Stage5["Stage 5: Test-Time Compute Allocation"]
-        D2 --> E1["Entropy-Gated Router\n(Probe Reasoning Entropy H(p))"]
+        D2 --> E1["Reasoning Entropy Router\nH(p) = -sum p log2(p)"]
         E1 -- "H < 0.55 (Certain)" --> E2["Fast Single-Pass (N=1)\n(Greedy / Low-Temp MoE Decoding)"]
         E1 -- "H >= 0.55 (Ambiguous)" --> E3["Parallel Best-of-N (N=4)\n(Multi-Seed Sandbox Verification & Diff Pruning)"]
     end
@@ -92,86 +86,304 @@ flowchart TD
 
 ---
 
-## 🏛️ Model Specifications & Mathematics
+## 🏛️ Model Specifications & Mathematical Foundation
 
-| Hyperparameter | Value | Architectural Purpose |
+| Hyperparameter | Value | Mathematical / Engineering Purpose |
 | :--- | :--- | :--- |
-| **Total Parameters** | **~70.55 Billion** | Deep reasoning across system architecture, algorithms, and 80+ programming languages |
-| **Active Parameters / Token** | **~14.2 Billion** | Fine-grained **16 Routed Experts + 2 Shared Experts (Top-2 Active)** |
-| **Layers (`n_layer`)** | **80** | Deep hierarchical abstraction of program logic, dataflow, and syntax |
-| **Hidden Dimension (`d_model`)** | **8,192** | Wide residual stream representation space |
-| **Attention Architecture** | **Multi-Head Latent Attention (MLA)** | DeepSeek-V3 style low-rank KV compression |
-| **KV Compression Dim ($d_c$)** | **512** | Key-Value down-projection reducing KV cache by ~90% |
-| **Decoupled RoPE Dim ($d_R$)** | **64** | Position keys decoupled from KV cache, avoiding cache expansion |
-| **Number of Heads** | **64** | Attention heads (head dimension = 128) |
-| **Expert Intermediate Size** | **4,096** | Fine-grained expert width for specialized algorithmic/domain routing |
-| **Load Balancing Mechanism** | **Auxiliary-Loss-Free** | Dynamic expert bias $b_i \leftarrow b_i - \gamma(t) \text{sign}(\text{load}_i - \bar{\text{load}})$ |
-| **Pre-Training Token Target** | **4.0 Trillion Tokens** | Range: **3.0T to 5.5T tokens** scaled to active parameter density |
-| **Context Window** | **131,072 tokens (128k)** | Full repository context enabled by MLA KV cache compression |
-| **Vocabulary Size** | **128,270** | Byte-Level BPE with specialized `<think>`, `<hypothesis>`, `<tool_call>`, FIM tags |
-| **Position Embeddings** | **RoPE ($\theta = 500,000$)** | High base frequency for long-context extrapolation |
+| **Total Parameters ($N_{\text{total}}$)** | **$\approx$ 70.55 Billion** | Deep hierarchical reasoning across 80+ programming languages, system design, and formal math |
+| **Active Parameters / Token ($N_{\text{active}}$)** | **$\approx$ 14.2 Billion** | Fine-grained **16 Routed Experts + 2 Shared Experts (Top-2 Active)** |
+| **Layers ($n_{\text{layer}}$)** | **80** | Deep composition of AST dataflow, abstraction hierarchies, and syntactic nuances |
+| **Hidden Dimension ($d_{\text{model}}$)** | **8,192** | Wide residual stream representation capacity |
+| **Attention Mechanism** | **Multi-Head Latent Attention (MLA)** | DeepSeek-V3 style low-rank joint Key-Value latent compression |
+| **KV Compression Rank ($d_c$)** | **512** | Key-Value down-projection dimension shrinking KV cache by $\approx 96.5\%$ vs MHA |
+| **Decoupled RoPE Dim ($d_R$)** | **64** | Position key vector decoupled from latent vector, avoiding KV cache bloat |
+| **Number of Heads ($n_{\text{heads}}$)** | **64** | Attention heads with individual head dimension $d_{\text{head}} = 128$ |
+| **Expert Intermediate Size** | **4,096** | Fine-grained SwiGLU expert width allowing granular domain specialization |
+| **Load Balancing Mechanism** | **Auxiliary-Loss-Free + Watchdog** | Dynamic bias $b_i \leftarrow b_i - \gamma \cdot \text{sign}(L_{\text{ema}, i} - \bar{L})$ with automatic 25% CV fallback penalty |
+| **Overlapped Communication** | **Async All-to-All** | Overlaps local shared/routed expert execution with remote InfiniBand/ICI transfers |
+| **Static Sequence Buckets** | **[2048, 8192, 32768, 131072]** | Strictly zero OpenXLA / PyTorch graph recompilations |
+| **Context Window** | **131,072 Tokens (128k)** | Full-repository reasoning enabled by MLA low-rank KV cache caching |
+| **Vocabulary Size** | **128,270** | Byte-Level BPE with special reasoning XML tags (`<think>`, `<hypothesis>`, `<tool_call>`) |
+| **Position Embeddings** | **RoPE ($\theta = 500,000$)** | High base frequency for long-context extrapolation across 128k context |
 
 ---
 
-## 💾 Multi-Head Latent Attention (MLA) & KV Cache Math
+## 💾 Multi-Head Latent Attention (MLA) & KV Cache Compression
 
-Traditional Multi-Head Attention (MHA) and Grouped-Query Attention (GQA) store full-rank Key and Value vectors in GPU/TPU memory for every token in the context window. At 128k context, this exhausts single-device memory.
+Traditional Multi-Head Attention (MHA) and Grouped-Query Attention (GQA) store full-rank Key and Value tensors for every token in GPU VRAM. At 128k context windows, standard MHA exhausts even an 80GB H100 GPU before model weights are loaded!
 
-### KV Cache Memory Per Token Equation:
-$$\text{Memory}_{\text{MHA}} = 2 \times n_{\text{layers}} \times n_{\text{heads}} \times d_{\text{head}} \times 2\text{ bytes}$$
-$$\text{Memory}_{\text{MLA}} = (d_c + d_R) \times n_{\text{layers}} \times 2\text{ bytes}$$
+```mermaid
+graph TD
+    subgraph TraditionalMHA["Standard Multi-Head Attention (MHA) - Cache per Token"]
+        M1["Key Cache: (n_heads=64) x (d_head=128) = 8,192 floats"]
+        M2["Value Cache: (n_heads=64) x (d_head=128) = 8,192 floats"]
+        M1 & M2 --> M3["Total MHA Footprint = 16,384 floats/token (32,768 bytes/token)"]
+    end
 
-| Attention Mechanism | Dimension per Token / Layer | 32k Context KV Cache (80 Layers) | 128k Context KV Cache (80 Layers) | Memory Reduction |
+    subgraph CadburyMLA["Cadbury Multi-Head Latent Attention (MLA) - Cache per Token"]
+        L1["Shared Compressed Latent KV: c_t^{KV} = 512 floats (d_c = 512)"]
+        L2["Decoupled Rotary Key: k_t^{RoPE} = 64 floats (d_R = 64)"]
+        L1 & L2 --> L3["Total MLA Footprint = 576 floats/token (1,152 bytes/token)"]
+    end
+    
+    TraditionalMHA -. "96.5% VRAM Reduction" .-> CadburyMLA
+```
+
+### Mathematical Formulation:
+1. **Query Low-Rank Down-Projection & Up-Projection:**
+   $$c_t^Q = \text{RMSNorm}(W_{dQ} \cdot x_t) \quad \in \mathbb{R}^{d_{cq}} \quad (d_{cq} = 1536)$$
+   $$q_t^C = W_{uQ} \cdot c_t^Q \quad \in \mathbb{R}^{n_h \times d_h}, \qquad q_t^R = \text{RoPE}(W_{rQ} \cdot c_t^Q) \quad \in \mathbb{R}^{n_h \times d_R}$$
+
+2. **Key-Value Low-Rank Compression (Stored in Cache):**
+   $$c_t^{KV} = \text{RMSNorm}(W_{dKV} \cdot x_t) \quad \in \mathbb{R}^{d_c} \quad (d_c = 512)$$
+   $$k_t^R = \text{RoPE}(W_{rK} \cdot x_t) \quad \in \mathbb{R}^{d_R} \quad (d_R = 64)$$
+
+3. **Content Unpacking on the Fly (Zero Cache Expansion):**
+   $$k_t^C = W_{uK} \cdot c_t^{KV} \quad \in \mathbb{R}^{n_h \times d_h}, \qquad v_t^C = W_{uV} \cdot c_t^{KV} \quad \in \mathbb{R}^{n_h \times d_h}$$
+
+4. **Attention Dot-Product Score:**
+   $$\text{Attn}(Q, K) = \frac{q_t^C (k_t^C)^T + q_t^R (k_t^R)^T}{\sqrt{d_h + d_R}}$$
+
+### Analytical KV Cache Memory Comparison (80 Layers):
+
+| Attention Architecture | Floats / Token / Layer | 32k Context KV Cache (80 Layers) | 128k Context KV Cache (80 Layers) | Memory Reduction Factor |
 | :--- | :--- | :--- | :--- | :--- |
-| **Standard MHA (64 heads)** | $2 \times 64 \times 128 = \mathbf{16,384\text{ floats}}$ | $\approx \mathbf{84.0\text{ GB}}$ | $\approx \mathbf{336.0\text{ GB}}$ *(OOM on 80GB GPU/TPU)* | Baseline ($1.0\times$) |
-| **GQA (8 KV heads)** | $2 \times 8 \times 128 = \mathbf{2,048\text{ floats}}$ | $\approx \mathbf{10.5\text{ GB}}$ | $\approx \mathbf{42.0\text{ GB}}$ | $8.0\times$ smaller |
-| **Cadbury MLA ($d_c=512, d_R=64$)** | $512 + 64 = \mathbf{576\text{ floats}}$ | $\approx \mathbf{2.9\text{ GB}}$ | $\approx \mathbf{11.8\text{ GB}}$ | **$\approx 28.4\times$ smaller ($\approx 90\%$ vs GQA)** |
+| **Standard MHA (64 heads)** | $2 \times 64 \times 128 = \mathbf{16,384}$ | $\approx \mathbf{84.0\text{ GB}}$ | $\approx \mathbf{336.0\text{ GB}}$ *(OOM on 80GB GPU)* | Baseline ($1.0\times$) |
+| **GQA (8 KV heads)** | $2 \times 8 \times 128 = \mathbf{2,048}$ | $\approx \mathbf{10.5\text{ GB}}$ | $\approx \mathbf{42.0\text{ GB}}$ | $8.0\times$ smaller |
+| **Cadbury MLA ($d_c=512, d_R=64$)** | $512 + 64 = \mathbf{576}$ | $\approx \mathbf{2.95\text{ GB}}$ | $\approx \mathbf{11.80\text{ GB}}$ | **$\approx 28.4\times$ smaller ($\approx 96.5\%$ vs MHA)** |
 
 ---
 
-## ⚖️ Auxiliary-Loss-Free Dynamic Load Balancing
+## ⚖️ Fine-Grained MoE, Overlapped Comm & Router Watchdog
 
-Traditional MoE routers use an auxiliary balance loss ($\mathcal{L}_{\text{aux}} = \alpha \sum f_i P_i$) added to the main training loss. This forces the router to route tokens suboptimal for code generation just to balance device load, directly damaging code perplexity.
+### 1. 16 Routed + 2 Shared Experts (Top-2 Gating)
+Cadbury-70B partitions the feed-forward layer into **16 fine-grained routed experts** plus **2 always-active shared experts**.
+- **Shared Experts:** Execute unconditionally for all tokens, absorbing common language grammar, base syntax, and common algorithmic conventions.
+- **Routed Experts:** 16 domain specialists (low-level systems, web backends, formal logic, diff patches), with the top-2 experts activated per token.
+- Total compute per token is strictly bounded to $(2 \text{ shared} + 2 \text{ routed}) = 4 \text{ expert slices} \approx \mathbf{14.2\text{B active parameters}}$, delivering 70B parameter capability at the compute and latency profile of a 14B dense model.
 
-Cadbury-70B Frontier V2 implements **Auxiliary-Loss-Free Balancing**:
-1. Token routing logits are computed as:
-   $$s_{i,t} = \text{Top2}\left( \text{Softmax}\left( W_r \cdot x_t + b_i \right) \right)$$
-2. An autonomous dynamic bias vector $b_i$ is maintained and updated after each forward pass without gradient backpropagation:
-   $$b_i \leftarrow b_i - \gamma(t) \cdot \text{sign}\left( \text{load}_i - \bar{\text{load}} \right)$$
-3. If expert $i$ is overloaded ($\text{load}_i > \bar{\text{load}}$), its bias is decremented, gently shifting boundary tokens to under-utilized experts without perturbing the model's language gradients.
+---
+
+### 2. Auxiliary-Loss-Free Router with Dynamic EMA Biasing
+Traditional MoE models use an auxiliary loss $\mathcal{L}_{\text{aux}} = \alpha \sum f_i P_i$ added directly to the cross-entropy loss. This distorts language modeling gradients, forcing the router to assign tokens to suboptimal experts just to equalize hardware execution.
+
+Cadbury-70B eliminates destructive auxiliary losses:
+1. **Unbiased Routing Weights:**
+   $$\text{Affinities: } s = W_r \cdot x_t$$
+   $$\text{Routing Decision: } \text{Top2}(s + b_i)$$
+   $$\text{Gradient Weights: } w = \text{Softmax}(s)[\text{Top2}]$$
+2. **Dynamic Non-Differentiable Bias Updates with EMA Smoothing:**
+   Batch assignments are tracked via Exponential Moving Average (EMA):
+   $$L_{\text{ema}, i}^{(t)} = \alpha L_{\text{ema}, i}^{(t-1)} + (1 - \alpha) L_{\text{batch}, i}^{(t)}$$
+   $$b_i^{(t)} \leftarrow b_i^{(t-1)} - \gamma(t) \cdot \text{sign}\left( L_{\text{ema}, i}^{(t)} - \bar{L}_{\text{ema}} \right)$$
+
+---
+
+### 3. Automated Fallback Watchdog (25% CV Trigger)
+To prevent catastrophic router collapse or NaN gradient explosions during rapid distribution shifts:
+- The router continuously calculates the **Coefficient of Variation (CV)**:
+  $$\text{CV} = \frac{\sigma(L_{\text{ema}})}{\bar{L}_{\text{ema}}}$$
+- **Normal Balanced State ($\text{CV} \le 0.25$):** The watchdog remains passive; auxiliary loss is strictly $\mathbf{0.0}$.
+- **Imbalance Alert ($\text{CV} > 0.25$):** If expert load variance exceeds 25%, the watchdog injects a mild stabilizing penalty:
+  $$\mathcal{L}_{\text{watchdog}} = \lambda_{\text{watchdog}} \cdot N_{\text{experts}} \sum_{i=1}^{N_{\text{experts}}} f_i \cdot P_i$$
+  As the dynamic bias rebalances the expert distribution, $\text{CV}$ drops below 0.25 and the penalty automatically returns to zero.
+
+---
+
+### 4. Asynchronous Overlapped All-to-All Collectives
+In multi-node Expert Parallel (EP) setups, tokens must be dispatched across node interconnects (InfiniBand NDR / ICI). Naive synchronous dispatch stalls GPU tensor cores during network transfer.
+
+Cadbury-70B implements **Overlapped All-to-All Execution** ([`model/moe_mla_architecture.py`](model/moe_mla_architecture.py)):
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant GPU as GPU Tensor Cores
+    participant Net as InfiniBand / ICI Interconnect
+    participant Shared as Shared Experts (Local)
+    participant Routed as Routed Experts (Remote & Local)
+
+    GPU->>Shared: 1. Launch Shared Expert Computation (Local)
+    GPU->>Net: 2. Async dist.all_to_all_single (Dispatch Tokens to Remote EP Ranks)
+    Note over Shared,Net: Shared Expert Execution & Token Transfer overlap 100% in parallel!
+    Shared-->>GPU: Shared Output Ready
+    Net-->>Routed: Dispatched Tokens Arrive
+    GPU->>Routed: 3. Execute Local Slice of Routed Experts
+    GPU->>Net: 4. Async dist.all_to_all_single (Combine Expert Results)
+    Net-->>GPU: Combined Expert Tokens Gathered
+    Note over GPU: Final Output = Shared Output + Routed Output
+```
+
+---
+
+## 🖥️ Distributed Memory Mathematics & VRAM Sharding
+
+### 1. Analytical Memory Formulas (ZeRO-3 / FSDP FULL_SHARD)
+For a 70.55B parameter model partitioned across $W$ distributed ranks:
+
+1. **Model Parameters ($M_{\text{params}}$):**
+   $$M_{\text{params}} = \frac{N_{\text{total}} \times B_{\text{precision}}}{W} \quad \text{where } B_{\text{precision}} = \begin{cases} 2 \text{ bytes} & (\text{bfloat16}) \\ 1 \text{ byte} & (\text{fp8\_hybrid}) \end{cases}$$
+   - At $W = 32$ (bf16): $\frac{70.55\text{B} \times 2}{32 \times 1024^3} \approx \mathbf{4.11\text{ GB / GPU}}$
+
+2. **Gradients ($M_{\text{grads}}$):**
+   $$M_{\text{grads}} = \frac{N_{\text{total}} \times 2\text{ bytes}}{W} \approx \mathbf{4.11\text{ GB / GPU}}$$
+
+3. **AdamW Optimizer States ($M_{\text{opt}}$):**
+   AdamW requires fp32 master weights (4 bytes) + first momentum (4 bytes) + second variance (4 bytes) = 16 bytes/param:
+   $$M_{\text{opt}} = \frac{N_{\text{total}} \times 16\text{ bytes}}{W} \approx \frac{70.55\text{B} \times 16}{32 \times 1024^3} \approx \mathbf{32.85\text{ GB / GPU}}$$
+   *(If CPU Offloading is active, $M_{\text{opt}}$ is shifted to Host RAM, freeing 32.85 GB VRAM).*
+
+4. **Multi-Head Latent Attention KV Cache ($M_{\text{KV}}$):**
+   $$M_{\text{KV}} = B_{\text{gpu}} \times S \times n_{\text{layers}} \times (d_c + d_R) \times 2\text{ bytes}$$
+   - For $B_{\text{gpu}} = 1, S = 131,072, n_{\text{layers}} = 80$:
+   $$M_{\text{KV}} = 1 \times 131,072 \times 80 \times (512 + 64) \times 2 \approx \mathbf{11.25\text{ GB / GPU}}$$
+
+5. **Activations with Selective Checkpointing ($M_{\text{act}}$):**
+   $$M_{\text{act}} \approx 2 \times d_{\text{model}} \times S \times B_{\text{gpu}} \times B_{\text{precision}} \approx \mathbf{2.00\text{ GB / GPU}}$$
+
+---
+
+### 2. Cluster Hardware Feasibility & Precision Comparison Matrix
+
+| Hardware Tier | World Size ($W$) | Precision Mode | Params / GPU | Grads / GPU | Opt States / GPU | KV Cache (128k) | Peak VRAM / GPU | OOM Safety Margin (on 80GB) |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **Tier 1: 1x 80GB** | $W = 1$ | 4-bit NF4 QLoRA | $35.2\text{ GB}$ | $1.2\text{ GB}$ (LoRA) | $2.4\text{ GB}$ | $11.8\text{ GB}$ | $\mathbf{\approx 52.6\text{ GB}}$ | ✅ **Safe** (+27.4 GB headroom) |
+| **Tier 2: 8x 80GB (1 Node)** | $W = 8$ | BF16 (ZeRO-3 + CPU Offload) | $16.4\text{ GB}$ | $16.4\text{ GB}$ | $0.0\text{ GB}$ (Host) | $11.8\text{ GB}$ | $\mathbf{\approx 46.6\text{ GB}}$ | ✅ **Safe** (+33.4 GB headroom) |
+| **Tier 3: 32x 80GB (4 Nodes)** | $W = 32$ | **BF16 (Full FSDP)** | $4.11\text{ GB}$ | $4.11\text{ GB}$ | $32.85\text{ GB}$ | $11.8\text{ GB}$ | $\mathbf{\approx 54.87\text{ GB}}$ | ✅ **Safe** (+25.1 GB headroom) |
+| **Tier 3: 32x 80GB (4 Nodes)** | $W = 32$ | **FP8 Hybrid (Transformer Engine)** | **$2.06\text{ GB}$** | $4.11\text{ GB}$ | $32.85\text{ GB}$ | $11.8\text{ GB}$ | $\mathbf{\approx 51.82\text{ GB}}$ | 🚀 **Optimal** (+28.2 GB headroom) |
+| **Tier 4: 32x TPU v5p (95GB)** | $W = 32$ | **BF16 SPMD Pjit (DP2 x EP8 x TP2)**| $4.41\text{ GB}$ | $4.41\text{ GB}$ | $32.85\text{ GB}$ | $11.8\text{ GB}$ | $\mathbf{\approx 55.47\text{ GB}}$ | 🚀 **Optimal** (+39.5 GB headroom) |
+
+---
+
+### 3. Hybrid 3D DeviceMesh Mapping (DP x EP x TP)
+Cadbury-70B maps onto physical hardware using `torch.distributed.device_mesh.init_device_mesh`:
+$$\text{Global Mesh Shape} = (\text{Data Parallel}, \text{Expert Parallel}, \text{Tensor Parallel}) = (4, 8, 1) \implies 32\text{ GPUs}$$
+- **Data Parallel (DP = 4):** Shards incoming batches across nodes.
+- **Expert Parallel (EP = 8):** Distributes the 16 routed experts so each rank holds exactly 2 experts ($16 / 8 = 2$).
+- **Tensor Parallel (TP = 1 or 2):** Shards high-rank attention projection weights when extreme intra-node memory reduction is desired.
+
+---
+
+## 🧪 Multi-Tier Execution Sandbox & GRPO Policy Verifier
+
+Simple regex patterns are notoriously vulnerable to reward hacking: models learn to inject dummy tests, skip markers, or wrap broken logic in bare `try...except: pass` blocks. Cadbury-70B replaces regex matching with a **3-Tier Verification Pipeline** ([`training/rl_grpo_verifier.py`](training/rl_grpo_verifier.py)).
+
+```mermaid
+flowchart TD
+    Candidate["Generated Completion\n(<think> ... ```python ... ```)"] --> T1{"Tier 1: Static AST & Compiler Check"}
+    
+    T1 -- "SyntaxError / Bare Except / Malformed" --> R1["Tier 1 Fail\nReward: -1.0"]
+    T1 -- "Clean AST & Symbols" --> T2{"Tier 2: Subprocess Sandbox\n(pytest execution)"}
+    
+    T2 -- "AssertionError / Exception / Crash" --> R2["Tier 2 Fail\nReward: -1.5"]
+    T2 -- "Timeout (> 3.0s / Big-O Violation)" --> R3["Tier 2 Timeout\nReward: -2.0"]
+    T2 -- "All Tests Passed" --> T3{"Tier 3: Metrics & Anti-Cheat"}
+    
+    T3 -- "Test Skipping (@pytest.mark.skip)" --> R4["Tier 3 Cheat Detected\nPenalty: -2.0"]
+    T3 -- "Sub-200ms Execution Time" --> B1["Speed Bonus (+0.5)"]
+    T3 -- "Clean Asymptotics" --> T4["Regularization Heads"]
+    
+    T4 --> P1["Adaptive Thinking Budget Penalty\n(-0.001 * excess <think> tokens)"]
+    T4 --> P2["Information-Gain Penalty\n(-0.05 * step - 0.2 * wasted file reads)"]
+    
+    B1 & P1 & P2 --> Final["Consolidated Verifiable Reward (R_i)"]
+```
+
+### 1. The 3-Tier Verification Pipeline
+1. **Tier 1: Static AST & Compiler Diagnostics:**
+   - Parses code via `ast.parse()`.
+   - Node visitor detects unhandled syntax constructs, broken indentation, and unassigned symbols.
+   - Rejects completions with empty functions containing only `pass`.
+2. **Tier 2: Isolated Subprocess / Docker Sandbox:**
+   - Mounts ephemeral temporary directories with strict POSIX resource limits (`resource.RLIMIT_CPU`, `resource.RLIMIT_AS` memory capped at 512MB).
+   - Executes real unit test suites using `pytest -q --tb=short`.
+   - Traps infinite loops and asymptotic complexity violations ($O(N^2)$ vs $O(N)$) via strict 3.0s timeouts.
+3. **Tier 3: Execution Metrics & Complexity Validation:**
+   - Latency profiling: completions passing tests in under 200ms receive a $+0.5$ speed reward.
+   - Resource profiling: monitors peak RSS RAM consumption during test execution.
+
+---
+
+### 2. Anti-Reward-Hacking & Anti-Cheat Guards
+The anti-cheat analyzer inspects code for evasive patterns:
+- `@pytest.mark.skip` / `unittest.skip` / `pytest.skip(...)`
+- Bare `except:` or `except Exception: pass` swallowers
+- Unconditional `sys.exit(0)` exits
+- Monkeypatching test assertions or overriding `builtins.AssertionError`
+Any detected violation immediately applies a **$-2.0$ cheat penalty** and fails the rollout.
+
+---
+
+### 3. Length & Information-Gain Regularized GRPO Equations
+In Group Relative Policy Optimization (GRPO), candidate completions $\{o_1, \dots, o_G\}$ are sampled for each prompt $q$:
+
+1. **Group Normalized Advantage:**
+   $$A_i = \frac{R_i - \text{mean}(\{R_1, \dots, R_G\})}{\text{std}(\{R_1, \dots, R_G\}) + \epsilon}$$
+
+2. **Adaptive Thinking Budget Penalty:**
+   $$R_{\text{length}} = -\lambda_{\text{len}} \cdot \max\left(0, N_{\text{think}} - \text{Budget}_{\text{target}}\right)$$
+   Models are rewarded for concise, low-entropy reasoning and penalized for rambling circular `<think>` rumination.
+
+3. **Information-Gain Tool Penalty:**
+   $$R_{\text{info}} = -\lambda_{\text{step}} \cdot N_{\text{tool\_calls}} - \lambda_{\text{waste}} \cdot N_{\text{unreferenced\_reads}}$$
+   Enforces surgical repository navigation: models that inspect 20 files without touching them are heavily penalized.
+
+4. **GRPO Clipped Loss with Reference Policy KL Penalty:**
+   $$\mathcal{L}_{\text{GRPO}}(\theta) = -\frac{1}{G} \sum_{i=1}^G \min\left( r_i(\theta) A_i, \text{clip}(r_i(\theta), 1-\epsilon, 1+\epsilon) A_i \right) + \beta D_{\text{KL}}(\pi_\theta \parallel \pi_{\text{ref}})$$
+
+---
+
+## ⚡ Dynamic Length-Stratified Bucketing Sampler
+
+Dynamic sequence lengths in distributed LLM training trigger two major failure modes:
+1. **OpenXLA & PyTorch Recompilation Freezes:** Variable tensor dimensions force the JIT compiler to recompile execution graphs, freezing cluster training for tens of minutes.
+2. **Padding Token Compute Waste:** Naively padding short 200-token functions to 128k wastes over 95% of tensor core FLOPs on dummy `<pad>` tokens.
+
+Cadbury-70B resolves this with [`data_processing/bucketing_sampler.py`](data_processing/bucketing_sampler.py):
+
+```mermaid
+graph LR
+    Input["Variable Raw Sequences\n(Lengths: 150 to 125,000 tokens)"] --> Sampler["LengthStratifiedBatchSampler"]
+    
+    subgraph Buckets["Strict Static Bucket Strata"]
+        B1["Bucket 1: 2,048 Tokens\nBatch Size = 64 (131,072 Tokens)"]
+        B2["Bucket 2: 8,192 Tokens\nBatch Size = 16 (131,072 Tokens)"]
+        B3["Bucket 3: 32,768 Tokens\nBatch Size = 4 (131,072 Tokens)"]
+        B4["Bucket 4: 131,072 Tokens\nBatch Size = 1 (131,072 Tokens)"]
+    end
+    
+    Sampler --> Buckets
+    Buckets --> Compiler["OpenXLA / PyTorch Compiler\n(Exactly 4 Graph Variants Pre-Compiled)"]
+    Compiler --> Run["100% Compute Efficiency\nZero JIT Freezes"]
+```
+
+### 1. Zero-Recompilation Guarantee for OpenXLA & PyTorch
+Every incoming sequence is mapped to one of four strict boundaries: `[2048, 8192, 32768, 131072]`.
+- PyTorch XLA and `torch.compile` generate **exactly 4 static execution graphs**.
+- Zero runtime shape mutations occur, completely eliminating JIT freezes.
+
+### 2. Constant-Token Micro-Batch Scaling
+To ensure consistent memory allocation and avoid batch OOM spikes, micro-batch sizes scale inversely with bucket length:
+$$\text{Tokens per Micro-Batch} = \text{Batch Size} \times \text{Bucket Length} = \mathbf{131,072\text{ Tokens}}$$
 
 ---
 
 ## 📊 Pre-Training Data Strategy & MoE Scaling Laws (3.0T – 5.5T Tokens)
 
-Pre-training an enterprise-grade Mixture-of-Experts coding model requires rethinking classical Chinchilla scaling laws. Naive dense scaling results either in severe under-training of expert sub-networks or massive compute inefficiency.
-
----
-
 ### 1. Chinchilla MoE Scaling & The Active Parameter Principle
-
 Under classical Chinchilla scaling ($D \approx 20 \times N$), a dense 70B model requires $\approx 1.4\text{ Trillion tokens}$. In Cadbury-70B's Sparse MoE:
 - **Total Parameters:** $N_{\text{total}} = 70.55\text{B}$
-- **Active Parameters Per Token:** $N_{\text{active}} \approx 14.1\text{B}$ (2 shared experts + 2 activated routed experts)
+- **Active Parameters Per Token:** $N_{\text{active}} \approx 14.2\text{B}$ (2 shared experts + 2 activated routed experts)
 
-#### The MoE Scaling Paradox:
-1. **The Naive Active Flaw:** If we trained solely on active parameter Chinchilla optimality ($20 \times 14.1\text{B} = 282\text{B tokens}$), each of the 16 routed experts would only be activated by $(282\text{B} \times 2) / 16 \approx \mathbf{35.25\text{ Billion tokens}}$. This severely under-trains expert weights, leading to high validation perplexity and failure to memorize language syntax.
-2. **The Routing Imbalance Flaw:** The MoE router requires high data diversity across varied problem domains to stabilize clean cluster boundaries. Without enough data volume, the router collapses into uniform mediocrity or starves niche domain experts (e.g., low-level systems assembly or formal math proofs).
-
-#### The MoE-Adjusted Scaling Law:
 To ensure each routed expert reaches true Chinchilla convergence ($> 400\text{B}$ specialized tokens per expert), we introduce the **Routing Diversity Multiplier ($M_{\text{routing}} = 14.18$)**:
 $$D_{\text{MoE}} = N_{\text{active}} \times 20 \times M_{\text{routing}} = 14.1\text{B} \times 20 \times 14.18 \approx \mathbf{4.0\text{ Trillion Tokens}}$$
 $$\text{Production Pre-Training Schedule: } \mathbf{3.0\text{ Trillion to } 5.5\text{ Trillion Tokens}}$$
-
-At 4.0 Trillion tokens, each of the 16 routed experts receives on average:
-$$\text{Tokens per Routed Expert} = \frac{4.0\text{T} \times \text{top\_k}}{N_{\text{routed}}} = \frac{4.0\text{T} \times 2}{16} = \mathbf{500\text{ Billion Tokens}}$$
-This achieves full parameter saturation while maintaining an inference cost equivalent to a 14B model!
 
 ---
 
 ### 2. Multi-Domain Data Mixing Ratios (60% Code / 40% Reasoning Prose)
 
-Cadbury-70B enforces a strictly balanced **60/40 Code-to-Reasoning split** via [`data_processing/dataset_mixer.py`](data_processing/dataset_mixer.py) and [`configs/training_scale_config.yaml`](configs/training_scale_config.yaml):
+Cadbury-70B enforces a strictly balanced **60/40 Code-to-Reasoning split** via [`data_processing/dataset_mixer.py`](data_processing/dataset_mixer.py):
 
 | Category | Domain Stream | Target Ratio | Tokens (at 4.0T Target) | Calibrated MinHash Threshold | FIM Rate | Primary Purpose |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -185,443 +397,15 @@ Cadbury-70B enforces a strictly balanced **60/40 Code-to-Reasoning split** via [
 
 ---
 
-### 3. Preventing Expert Starvation via 16-Expert Domain Segmentation
+## ☁️ Google Cloud TPU Pod Deployment Guide (v5p / v6e Trillium)
 
-Why is 40% natural language prose essential for a code LLM? 
-Training on 100% pure code causes the **"Syntax Idiot-Savant"** failure mode—where a model can write syntax but cannot reason through system design tradeoffs, algorithmic proofs, or concurrency race conditions.
+Cadbury-70B includes first-class support for **Google Cloud TPU Pod Slices (TPU v5p, TPU v6e Trillium, and TPU v5e)**. The entire 70B MoE + MLA architecture runs without downscaling via 3D SPMD / Pjit mesh sharding across 4.8 Tbps Inter-Chip Interconnects (ICI).
 
-By feeding a 60/40 code/reasoning split into 16 routed experts, the model naturally partitions into **4 specialized expert clusters**:
-
-```mermaid
-graph TD
-    subgraph Shared["Always-Active Shared Experts (Universal Foundation)"]
-        S0["Shared Expert 0: Universal Syntax & Byte Grammar"]
-        S1["Shared Expert 1: Natural Language Logic & Common Patterns"]
-    end
-
-    subgraph Routed["16 Specialized Routed Experts (Top-2 Activated per Token)"]
-        subgraph Cluster1["Experts 0 - 3: Low-Level Systems"]
-            E0["E0: C / C++ / Pointer Arithmetic"]
-            E1["E1: Rust Ownership & Concurrency"]
-            E2["E2: Go Goroutines & Runtime"]
-            E3["E3: Assembly, Kernels & Drivers"]
-        end
-        subgraph Cluster2["Experts 4 - 7: Application & Infrastructure"]
-            E4["E4: Python Backend & AsyncIO"]
-            E5["E5: TypeScript / Modern Web"]
-            E6["E6: Java / Enterprise Architectures"]
-            E7["E7: SQL, Schemas & Distributed DBs"]
-        end
-        subgraph Cluster3["Experts 8 - 11: Algorithmic Logic & Mathematics"]
-            E8["E8: Data Structures & Dynamic Prog."]
-            E9["E9: Graph Theory & Combinatorics"]
-            E10["E10: Formal Proofs (Lean4/Logic)"]
-            E11["E11: Big-O Bounds & Complexity"]
-        end
-        subgraph Cluster4["Experts 12 - 15: Architecture & Software Evolution"]
-            E12["E12: System Design & Microservices"]
-            E13["E13: Git Diffs & PR Refactoring"]
-            E14["E14: API Protocols (gRPC/REST)"]
-            E15["E15: Bug Localization & LSP Tools"]
-        end
-    end
-```
-
----
-
-### 4. Dynamic Bias Decay Schedule ($\gamma(t)$) Across 4 Trillion Tokens
-
-To ensure the router breaks symmetry early without oscillating late in training, the dynamic bias learning rate $\gamma(t)$ follows a cosine decay schedule ([`model/moe_routing_config.py`](model/moe_routing_config.py)):
-
-$$\gamma(t) = \gamma_{\text{min}} + \frac{1}{2}(\gamma_0 - \gamma_{\text{min}})\left(1 + \cos\left(\pi \frac{t - t_{\text{warmup}}}{T - t_{\text{warmup}}}\right)\right)$$
-
-| Token Milestone | Training Stage | $\gamma(t)$ Value | Router Behavior | Target Load CV ($\sigma / \mu$) |
-| :--- | :--- | :--- | :--- | :--- |
-| **$0 \rightarrow 100\text{ Billion}$** | Warmup Phase | $\mathbf{0.0050}$ | High exploration to break expert symmetry | $CV \le 0.25$ |
-| **$500\text{ Billion}$** | Early Specialization | $\mathbf{0.0044}$ | Cluster boundaries begin to emerge | $CV \le 0.18$ |
-| **$1.0\text{ Trillion}$** | Core Pre-Training | $\mathbf{0.0036}$ | Experts separate into 4 domain clusters | $CV \le 0.14$ |
-| **$2.0\text{ Trillion}$** | Mid-Point Saturation | $\mathbf{0.0026}$ | Domain specialization fully established | $CV \le 0.12$ |
-| **$3.0\text{ Trillion}$** | Convergence Threshold | $\mathbf{0.0016}$ | High balance across all 16 experts | $CV \le 0.10$ |
-| **$4.0\text{ Trillion}$** | Target Saturation | $\mathbf{0.0002}$ | Fine micro-adjustments with 0 routing jitter | $CV \le 0.08$ |
-
----
-
-## 🖥️ Hardware Requirements & Feasibility Matrix
-
-Training a 70B parameter model requires planning across four memory categories:
-- **Model Parameters (bfloat16):** $70.55\text{B} \times 2\text{ bytes} \approx \mathbf{141.1\text{ GB}}$
-- **Gradients (bfloat16):** $70.55\text{B} \times 2\text{ bytes} \approx \mathbf{141.1\text{ GB}}$
-- **Optimizer States (AdamW fp32: master weights + momentum + variance):** $70.55\text{B} \times 8\text{ bytes} \approx \mathbf{564.4\text{ GB}}$
-- **Total Static State:** $\approx \mathbf{846.6\text{ GB}}$ (excluding dynamic activations)
-
-### Hardware Tiers & Supported Phases
-
-```mermaid
-graph LR
-    H1["Single GPU\n1x 80GB (A100/H100)\nor 1x 48GB (RTX 6000)"] -->|"QLoRA 4-bit NF4\nInference & Eval"| T1["Tier 1: Workstation"]
-    H2["Single Node\n8x 80GB (A100/H100)\nNVLink (900 GB/s)"] -->|"Full SFT & GRPO\nZeRO-3 / FSDP"| T2["Tier 2: Node Server"]
-    H3["Multi-Node Cluster\n32x to 64x H100 80GB\nInfiniBand NDR 400G"] -->|"Full Pretraining (CPT)\n128k Long-Context SFT"| T3["Tier 3: Supercomputer"]
-    H4["Google Cloud TPU Pod\n32x to 128x TPU v5p/v6e\n4.8 Tbps ICI Torus"] -->|"Full MoE Pretraining\nXLA Pjit Sharding"| T4["Tier 4: TPU Pod Slice"]
-```
-
-| Hardware Setup | Interconnect | Supported Stages | Memory per Chip/GPU | Method |
-| :--- | :--- | :--- | :--- | :--- |
-| **Tier 1: Single GPU**<br>1x A100 / H100 (80GB)<br>*(or 1x RTX 6000 Ada 48GB)* | PCIe 4.0 / 5.0 | • 4-bit QLoRA SFT<br>• Synthetic Data Generation<br>• Entropy-Gated Inference Router | $\approx 45\text{--}55\text{ GB}$ total VRAM | `training/train_qlora.py` with BitsAndBytes NF4 + Paged AdamW |
-| **Tier 2: Single Node**<br>8x A100 / H100 (80GB) | NVLink<br>(600–900 GB/s) | • Full-Parameter SFT (bf16)<br>• GRPO Reinforcement Learning<br>• Sequence Packing up to 32k | $\approx 35\text{--}55\text{ GB}$ per GPU | `training/sft_reasoning_trainer.py` & `training/rl_grpo_verifier.py` with FSDP |
-| **Tier 3: Multi-Node Cluster**<br>4–8 Nodes (32–64x H100 80GB) | InfiniBand NDR/HDR<br>(200–400 Gbps) | • Full Pretraining (CPT) from scratch<br>• Full SFT with 128k Context<br>• Multi-node GRPO Policy Optimization | $\approx 26.5\text{ GB}$ static + activations | `training/launch_slurm.sh` or `torchrun` with PyTorch FSDP FULL_SHARD |
-| **Tier 4: Google Cloud TPU Pod**<br>32x to 128x TPU v5p / v6e | 3D Torus ICI<br>(4,800 Gbps) | • Full 70B MoE Pretraining (3.0T-5.5T)<br>• 128k Context Serving with OpenXLA<br>• FP8 Cloud Distributed Checkpointing | 95 GB HBM per chip<br>($3,040\text{ GB}$ aggregate) | `hardware/tpu_optimization.py` & `inference/tpu_inference.py` with XLA SPMD |
-
----
-
-## ☁️ Google Cloud TPU Pod Deployment Guide (v5e / v5p / v6e Trillium)
-
-Cadbury-Chocolate Frontier V2 includes first-class support for **Google Cloud TPU Pod Slices (TPU v5p, TPU v6e Trillium, and TPU v5e)**. The entire 70B MoE + MLA architecture runs without downscaling by leveraging 3D Pjit SPMD sharding across high-bandwidth Inter-Chip Interconnects (ICI).
-
----
-
-### 1. 3D SPMD / Pjit Mesh Sharding Architecture
-
-The physical TPU device mesh is organized across 3 orthogonal dimensions:
+### 3D SPMD / Pjit Mesh Sharding:
 $$\text{Mesh Shape} = (\text{Data Parallel}, \text{Expert Parallel}, \text{Tensor Parallel}) = (2, 8, 2) \implies 32\text{ TPU Chips}$$
-
-```mermaid
-flowchart TD
-    subgraph TPUMesh["3D TPU v5p Physical Device Mesh (32 Chips)"]
-        DP["Data Parallel (DP = 2)\nBatch Tokens Sharded across DCI/ICI"]
-        EP["Expert Parallel (EP = 8)\n16 Routed Experts Sharded over 4.8 Tbps ICI"]
-        TP["Tensor Parallel (TP = 2)\nAttention Heads & MLA Projections Sharded"]
-    end
-
-    subgraph ShardingMapping["Tensor PartitionSpec Sharding Rules"]
-        W_emb["Embedding Table: ('model', None)"]
-        W_mla["MLA Projections: ('model', None) and (None, 'model')"]
-        W_moe["16 Routed Experts: ('expert', None, 'model')"]
-        W_shared["2 Shared Experts: Replicated on EP, Sharded on TP"]
-        W_lm["Final LM Head: ('model', None)"]
-    end
-
-    TPUMesh --> ShardingMapping
-```
-
-#### Tensor Sharding Manifest:
-- **Expert Parallelism (EP = 8):** The 16 domain-specialized experts are distributed across 8 chips (2 experts per chip). When tokens are routed via top-2 gating, token representations are dispatched across the 4.8 Tbps ICI 3D torus via non-blocking all-to-all collectives.
-- **Tensor Parallelism (TP = 2):** Attention heads and MLA query/key/value projections are partitioned across 2 chips, keeping intermediate activations well within TPU HBM limits.
-- **Data Parallelism (DP = 2):** Sequences are partitioned across batch dimensions.
-- **Contiguous TPU Memory-Bandwidth KV Cache (`hardware/tpu_optimization.py`):** Multi-Head Latent Attention KV cache is pre-allocated as contiguous static tensors aligned with TPU $128 \times 128$ systolic array memory lanes, preventing HBM fragmentation.
-
----
-
-### 2. High-Precision Cloud Distributed Checkpointing (GCS + FP8)
-
-Saving a 70B parameter model across cloud pods without rank-0 memory exhaustion is handled by [`hardware/distributed_checkpoint.py`](hardware/distributed_checkpoint.py):
-
-- **Zero-Gather Asynchronous Checkpointing:** Each TPU chip asynchronously writes its local sharded partition directly to Google Cloud Storage (`gs://...`). Rank 0 writes the global metadata index (`checkpoint_manifest.json`) without ever gathering the full 141 GB into host RAM.
-- **FP8 (E4M3 / E5M2) Quantization Casting:** Halves checkpoint storage footprint from **141.1 GB to 70.5 GB** with per-tensor inverse scale factors (`scale_inv`), retaining numerical stability for code reasoning.
-
-```python
-from hardware.distributed_checkpoint import DistributedCheckpointEngine, CheckpointPrecision
-
-engine = DistributedCheckpointEngine(
-    checkpoint_dir="gs://cadbury-checkpoints-us-central1/70b_moe_mla",
-    precision=CheckpointPrecision.FLOAT8_E4M3,
-    num_shards=32,
-    async_save=True,
-)
-
-# Each rank writes its local slice
-engine.save_sharded_state_dict(local_state_dict, rank=xm.get_ordinal(), epoch=1, global_step=5000)
-```
-
----
-
-### 3. Universal HF / Megatron to Cadbury MoE+MLA Conversion
-
-To initialize Cadbury-70B from existing dense checkpoints (e.g. HuggingFace Llama-3-70B, DeepSeek, or Megatron-LM), use the conversion pipeline:
-
-```bash
-python -c '
-from hardware.distributed_checkpoint import CheckpointConverter
-import torch
-
-converter = CheckpointConverter()
-hf_weights = torch.load("checkpoints/llama3-70b-dense.pt", map_location="cpu")
-converter.convert_hf_checkpoint(hf_weights, output_dir="checkpoints/cadbury-70b-converted")
-'
-```
-
-- **MHA $\rightarrow$ MLA Low-Rank SVD:** Decomposes dense $W_k$ and $W_v$ into down-projection $W_{\text{dkv}}$ ($d_c = 512$) and up-projections $W_{\text{uk}}, W_{\text{uv}}$.
-- **Dense MLP $\rightarrow$ 16 Routed + 2 Shared Experts:** Initializes shared experts directly and creates 16 routed experts with orthogonal symmetry-breaking perturbations.
-
----
-
-### 4. High-Throughput TPU Serving with Persistent XLA Graph Cache
-
-Deploy the model for ultra-low latency inference using [`inference/tpu_inference.py`](inference/tpu_inference.py):
-
-```bash
-# Launch TPU hardware-aware inference runner
-python inference/tpu_inference.py
-```
-
-#### Key Serving Features:
-- **Predefined Static Sequence Buckets:** Inputs are padded to predefined lengths (`[128, 512, 2048, 8192, 32768, 131072]`), completely preventing XLA graph recompilations.
-- **Zero-Allocation Decoding:** Autoregressive generation updates contiguous static TPU buffers in-place.
-- **Parallel Batching:** Achieves up to **45% Model FLOPs Utilization (MFU)** on a 32-chip TPU v5p pod slice.
-
----
-
-## ⚙️ Environment Setup & Cluster Prerequisites
-
-### 1. System Requirements & Driver Stack
-- **GPU Cluster:** Ubuntu 22.04 LTS, NVIDIA Driver >= 535.104, CUDA Toolkit >= 12.2, NCCL >= 2.18
-- **Google Cloud TPU:** TPU VM with Ubuntu 22.04, `torch_xla >= 2.3.0`, `libtpu`
-
-### 2. Virtual Environment & Dependencies
-Clone the repository and install dependencies inside an isolated environment:
-
-```bash
-git clone https://github.com/erexhost-lang/cadbury_chocolate_70b.git
-cd cadbury_chocolate_70b
-
-# Create and activate Python virtual environment
-python3 -m venv cadbury-env
-source cadbury-env/bin/activate
-
-# Upgrade packaging tools
-pip install --upgrade pip setuptools wheel
-
-# Install PyTorch with native CUDA 12.2+ build (or PyTorch/XLA for TPUs)
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-
-# Install repository dependencies
-pip install -r requirements.txt
-
-# Compile FlashAttention-2 (For NVIDIA GPU clusters)
-pip install flash-attn --no-build-isolation
-```
-
-### 3. Recommended Cluster Environment Variables
-Add these flags to your `.bashrc` or cluster launch scripts:
-
-```bash
-# Optimize PyTorch CUDA Memory Allocator against OOM fragmentation (GPUs)
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
-
-# High-Performance InfiniBand NCCL Settings (GPUs)
-export NCCL_DEBUG=INFO
-export NCCL_IB_DISABLE=0
-export NCCL_IB_HCA=mlx5
-export NCCL_IB_GID_INDEX=3
-export NCCL_NET_GDR_LEVEL=3
-export NCCL_BUFFSIZE=16777216
-export NCCL_CROSS_NIC=1
-
-# High-Performance Google Cloud TPU Runtime Flags
-export PJRT_DEVICE=TPU
-export XLA_USE_BF16=1
-export XLA_DOWNCAST_BF16=1
-export XLA_FLAGS="--xla_gpu_enable_async_all_gather=true --xla_tpu_enable_latency_hiding_scheduler=true"
-
-# Enable unbuffered stream logs
-export PYTHONUNBUFFERED=1
-```
-
----
-
-## 🚀 Step-by-Step Training Guide
-
-Follow these sequential phases to train Cadbury-70B across the 3.0T to 5.5T token schedule.
-
----
-
-### Phase 1: Data Collection, Ingestion & Tokenizer Training
-
-#### 1. Ingest Raw Code via Streaming (Zero Disk Waste)
-Fetch and stream raw multi-language datasets directly from Hugging Face:
-```bash
-python data_collection/stream_hf_code.py \
-    --dataset-name "bigcode/the-stack-v2" \
-    --output-dir "data/raw/the_stack" \
-    --max-samples 500000
-```
-
-#### 2. Execute Multi-Domain Dataset Mixer (60% Code / 40% Reasoning)
-Run the calibrated dataset mixer to assemble the 4.0T token pre-training mixture:
-```bash
-python data_processing/dataset_mixer.py
-```
-
-#### 3. Train Byte-Level BPE Tokenizer
-Train the 128,270 vocabulary tokenizer with dedicated reasoning XML tags (`<think>`, `<hypothesis>`, `<tool_call>`, `<tool_output>`) and FIM control tokens:
-```bash
-python tokenization/train_code_tokenizer.py \
-    --data-path "data/processed/deduped_samples.jsonl" \
-    --vocab-size 128270 \
-    --output-dir "tokenization/cadbury_tokenizer"
-```
-
-#### 4. Topologically Pack Repositories with FIM
-Pack multi-file repositories using dependency DAGs and 50% Fill-In-The-Middle (PSM/SPM):
-```bash
-python data_processing/repo_packer_fim.py \
-    --input-dir "data/processed/deduped_samples.jsonl" \
-    --output-dir "data/processed/packed_128k" \
-    --max-seq-len 131072
-```
-
----
-
-### Phase 2: Continual Pretraining (CPT) on GPU Cluster
-
-Pretraining requires a multi-node GPU cluster (e.g. 4 nodes $\times$ 8 H100 GPUs) or a Google Cloud TPU v5p pod slice.
-
-#### Option 1: Launch via SLURM Cluster Workload Manager (GPUs)
-Submit the production job script [`training/launch_slurm.sh`](training/launch_slurm.sh):
-```bash
-sbatch training/launch_slurm.sh
-```
-
-#### Option 2: Launch via Bare-Metal `torchrun` across 4 Nodes (GPUs)
-```bash
-torchrun \
-    --nnodes=4 \
-    --nproc_per_node=8 \
-    --node_rank=0 \
-    --master_addr="10.0.0.1" \
-    --master_port=29500 \
-    training/pretrain_fsdp.py \
-    --config-path "configs/fsdp_config.yaml" \
-    --model-config "configs/model_70b_config.yaml" \
-    --data-path "data/processed/packed_128k" \
-    --output-dir "checkpoints/cadbury-70b-cpt" \
-    --max-seq-len 131072 \
-    --batch-size-per-gpu 1 \
-    --grad-accum 8 \
-    --lr 1.5e-4
-```
-
----
-
-### Phase 3: Synthetic Trajectories & Compiler LSP Data
-
-Transform software evolution trajectories and synthetic algorithmic reasoning tasks into SFT format.
-
-#### 1. Generate Synthetic CoT & Bayesian Trajectories
-Produces structured ChatML data with anti-rumination pruning and hypothesis ranking:
-```bash
-python data_synthesis/generate_reasoning_traces.py \
-    --num-samples 50000 \
-    --output-file "data/processed/sft_reasoning/synthetic_traces.jsonl"
-```
-
-#### 2. Format Git Commits & PRs into `SEARCH/REPLACE` Diffs
-Extracts real pull request evolution into surgical diff hunks:
-```bash
-python data_processing/git_diff_pipeline.py \
-    --commits-input "data/raw/git_commits.jsonl" \
-    --output-file "data/processed/sft_reasoning/git_diff_traces.jsonl"
-```
-
----
-
-### Phase 4: Supervised Fine-Tuning (SFT)
-
-#### Option A: Full Multi-Node Cluster SFT (4 Nodes $\times$ 8 GPUs)
-Uses Completion-Only Masking, NEFTune embedding noise ($\alpha = 5.0$), and full 128k context:
-```bash
-torchrun \
-    --nnodes=4 \
-    --nproc_per_node=8 \
-    --rdzv_id=cadbury_sft \
-    --rdzv_backend=c10d \
-    --rdzv_endpoint=master-node:29500 \
-    training/sft_reasoning_trainer.py \
-    --model-path "checkpoints/cadbury-70b-cpt" \
-    --data-file "data/processed/sft_reasoning/synthetic_traces.jsonl" \
-    --output-dir "checkpoints/cadbury-70b-sft" \
-    --neftune-alpha 5.0 \
-    --max-seq-len 131072 \
-    --lr 2e-5 \
-    --epochs 3
-```
-
-#### Option B: Single-GPU 4-bit QLoRA Fine-Tuning (1x 80GB A100/H100)
-For researchers running on a single 80GB GPU or workstation:
-```bash
-python training/train_qlora.py \
-    --model-name-or-path "meta-llama/Meta-Llama-3-70B" \
-    --data-file "data/processed/sft_reasoning/sample_reasoning_data.jsonl" \
-    --output-dir "checkpoints/cadbury-70b-qlora" \
-    --lora-r 64 \
-    --lora-alpha 128 \
-    --lora-dropout 0.05 \
-    --batch-size 1 \
-    --grad-accum 16 \
-    --lr 2e-4 \
-    --epochs 3
-```
-
----
-
-### Phase 5: Reinforcement Learning via GRPO (RLVR)
-
-Post-SFT alignment uses **Group Relative Policy Optimization (GRPO)** with **Deterministic Verifiable Step Rewards**:
-
-```bash
-torchrun --nproc_per_node=8 training/rl_grpo_verifier.py \
-    --model-path "checkpoints/cadbury-70b-sft" \
-    --output-dir "checkpoints/cadbury-70b-aligned" \
-    --num-generations 8 \
-    --max-prompt-length 4096 \
-    --max-completion-length 8192 \
-    --learning-rate 5e-7 \
-    --beta 0.04
-```
-
-During training, candidate rollouts are evaluated against 6 deterministic verifiable reward functions:
-1. `format_reward_fn`: Strict XML tags (`<think>`, `<hypothesis>`, `<tool_call>`).
-2. `syntax_and_ast_reward_fn`: Python AST validity on generated code and patches.
-3. `execution_sandbox_reward_fn`: Functional test correctness in isolated subprocesses.
-4. `adaptive_thinking_budget_reward_fn`: Length penalty rewarding concise reasoning traces.
-5. `anti_reward_hacking_fn`: Catches test-skipping cheats and hardcoded returns.
-6. `verifiable_process_reward_fn`: Scores $\le 2$-hop LSP navigation and zero linter diagnostics.
-
----
-
-### Phase 6: Inference & Confidence-Gated Test-Time Compute
-
-Deploy the model with the **Confidence-Gated Best-of-N Sandbox Router**:
-
-```bash
-python inference/test_time_router.py
-```
-
----
-
-## 🔧 Cluster Optimization & Troubleshooting
-
-### 1. CUDA Out of Memory (OOM) Checklist
-- **Enable Expandable Segments:** Ensure `export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` is set before invoking Python.
-- **Enable Activation Checkpointing:** In `configs/fsdp_config.yaml`, ensure `fsdp_transformer_layer_cls_to_wrap: LlamaDecoderLayer` is active to discard and recompute intermediate activations during backward pass.
-- **Micro-Batch Sizing:** Reduce `--batch-size-per-gpu` to `1` and scale up `--grad-accum` (gradient accumulation steps) to maintain your desired global batch size.
-
-### 2. Resolving NCCL Timeouts on InfiniBand
-If multi-node training hangs during all-gather or backward reduction:
-```bash
-export NCCL_DEBUG=WARN
-export NCCL_TIMEOUT=1800  # Increase timeout to 30 minutes for large-scale syncs
-export NCCL_IB_DISABLE=0
-export NCCL_NET_GDR_LEVEL=3
-```
-Ensure firewall ports between nodes are open on port range `29500-29550`.
-
-### 3. Preventing Loss Spikes & NaN Gradients
-- Use **bfloat16 mixed precision** exclusively (never fp16 for 70B, as fp16 has only a 5-bit exponent and suffers from frequent underflows/overflows).
-- Apply gradient norm clipping at `1.0`:
-  ```python
-  torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-  ```
-- Use a cosine learning rate scheduler with at least **2,000 warm-up steps**.
+- **Expert Parallelism (EP = 8):** 16 routed experts sharded across 8 chips (2 experts/chip).
+- **Tensor Parallelism (TP = 2):** Attention heads and MLA latent projections partitioned across 2 chips.
+- **Contiguous TPU KV Cache:** Memory buffers aligned with $128 \times 128$ systolic array memory lanes, preventing HBM fragmentation ([`hardware/tpu_optimization.py`](hardware/tpu_optimization.py)).
 
 ---
 
@@ -641,6 +425,7 @@ cadbury-chocolate/
 │   ├── github_crawler.py         # Multi-language Git repository harvester
 │   └── fim_formatter.py          # Fill-In-The-Middle (PSM/SPM) transformations
 ├── data_processing/
+│   ├── bucketing_sampler.py      # Dynamic length-stratified batch sampler (2k, 8k, 32k, 128k buckets)
 │   ├── dataset_mixer.py          # Multi-domain weighted sampler (60% code / 40% reasoning)
 │   ├── syntax_validator.py       # AST-based syntax checking (Python, JS, C, Rust)
 │   ├── secret_scrubber.py        # PII, API tokens, and cryptographic key sanitizer
@@ -653,7 +438,8 @@ cadbury-chocolate/
 │   ├── generate_reasoning_traces.py # Surgical System Design, DSA, & Anti-Rumination ReAct generator
 │   └── lsp_tools.py              # Compiler LSP tools (definition, references, diagnostics, types)
 ├── hardware/
-│   ├── __init__.py               # TPU and distributed checkpoint exports
+│   ├── __init__.py               # Hardware module exports
+│   ├── distributed_sharding.py   # PyTorch FSDP, DeepSpeed ZeRO-3, TE FP8, DeviceMesh & VRAM budgeting
 │   ├── tpu_optimization.py       # OpenXLA compilation, 3D SPMD/Pjit sharding, contiguous KV cache
 │   └── distributed_checkpoint.py # High-precision cloud sharded checkpointing (BF16/FP8, GCS)
 ├── inference/
@@ -662,7 +448,7 @@ cadbury-chocolate/
 │   └── tpu_inference.py          # High-throughput TPU serving engine with persistent XLA cache
 ├── model/
 │   ├── __init__.py               # Model exports (MLA, MoE, Router, Cadbury70BMoEModel)
-│   ├── moe_mla_architecture.py   # Multi-Head Latent Attention & Sparse MoE PyTorch modules
+│   ├── moe_mla_architecture.py   # Multi-Head Latent Attention, Overlapped MoE, Aux-Loss-Free Router + Watchdog
 │   └── moe_routing_config.py     # Auxiliary-Loss-Free router scheduler across 3T-5.5T tokens
 ├── tokenization/
 │   ├── train_code_tokenizer.py   # Byte-Level BPE with special tags (<think>, <hypothesis>, <tool_call>)
@@ -671,7 +457,7 @@ cadbury-chocolate/
 │   ├── adaptive_compute.py       # Multi-Token Prediction (MTP) & Entropy Early-Exit Gate
 │   ├── pretrain_fsdp.py          # Multi-node FSDP pretrainer with FlashAttention-2
 │   ├── sft_reasoning_trainer.py  # Completion-Only Masked SFT with NEFTune regularizer
-│   ├── rl_grpo_verifier.py       # GRPO with Deterministic Verifiable Step Rewards
+│   ├── rl_grpo_verifier.py       # 3-Tier Verification Pipeline (AST, pytest Sandbox, Metrics) + GRPO Engine
 │   ├── train_qlora.py            # 4-bit QLoRA fine-tuning for 70B on 1x 80GB GPU
 │   └── launch_slurm.sh           # HPC SLURM submission script (4 nodes x 8 GPUs)
 ├── utils/

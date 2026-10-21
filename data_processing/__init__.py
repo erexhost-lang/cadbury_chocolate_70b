@@ -16,6 +16,12 @@ from .dataset_mixer import (
     CalibratedDomainFilter,
     MultiDomainDatasetMixer,
 )
+from .bucketing_sampler import (
+    BucketingConfig,
+    LengthStratifiedBatchSampler,
+    DistributedLengthStratifiedSampler,
+    BucketPaddingCollator,
+)
 
 __all__ = [
     "validate_code_syntax",
@@ -33,5 +39,9 @@ __all__ = [
     "MixingScheduleConfig",
     "CalibratedDomainFilter",
     "MultiDomainDatasetMixer",
+    "BucketingConfig",
+    "LengthStratifiedBatchSampler",
+    "DistributedLengthStratifiedSampler",
+    "BucketPaddingCollator",
 ]
 

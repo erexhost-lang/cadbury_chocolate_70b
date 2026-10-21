@@ -15,6 +15,19 @@ from .distributed_checkpoint import (
     CheckpointConverter,
 )
 
+from .distributed_sharding import (
+    ShardingBackend,
+    PrecisionMode,
+    MeshTopologyConfig,
+    DistributedShardingConfig,
+    VRAMBudgetCalculator,
+    DynamicDeviceMeshManager,
+    FP8PrecisionManager,
+    FSDPShardingEngine,
+    DeepSpeedZeRO3Configurator,
+    MoEParallelDispatcher,
+)
+
 __all__ = [
     "TPUMeshConfig",
     "TPUEnvironmentManager",
@@ -27,4 +40,14 @@ __all__ = [
     "FP8Quantizer",
     "DistributedCheckpointEngine",
     "CheckpointConverter",
+    "ShardingBackend",
+    "PrecisionMode",
+    "MeshTopologyConfig",
+    "DistributedShardingConfig",
+    "VRAMBudgetCalculator",
+    "DynamicDeviceMeshManager",
+    "FP8PrecisionManager",
+    "FSDPShardingEngine",
+    "DeepSpeedZeRO3Configurator",
+    "MoEParallelDispatcher",
 ]
