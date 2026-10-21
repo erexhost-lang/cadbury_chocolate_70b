@@ -1,46 +1,69 @@
 # ==============================================================================
-# Cadbury-Chocolate 70B: Model Architecture Configuration
+# Cadbury-Chocolate 70B: Model Architecture Configuration (Frontier V2)
 # ==============================================================================
-# Architecture modeled after modern 70B open-weights state-of-the-art (Llama-3-70B class)
+# Architecture: Sparse Mixture-of-Experts (MoE) + Multi-Head Latent Attention (MLA)
 # Parameter calculation:
 #   - Layers: 80
 #   - Hidden Dim: 8192
-#   - Intermediate Dim (SwiGLU): 28672 (~3.5x hidden_size)
-#   - Attention: Grouped Query Attention (GQA) with 64 Q heads and 8 KV heads
-#   - Context Window: 32,768 tokens (extended from 8k via YaRN RoPE Scaling)
-#   - Active Parameters: ~70.55 Billion
+#   - Total Model Capacity: ~70.55 Billion parameters
+#   - Active Parameters Per Token: ~14.1 Billion (2 shared + 2 routed experts)
+#   - Attention: MLA with 512-dim Low-Rank KV compression (90% KV Cache reduction)
+#   - Context Window: 131,072 tokens (128k supported via YaRN + MLA compression)
 # ==============================================================================
 
-model_type: "cadbury_70b"
+model_type: "cadbury_70b_moe_mla"
 architectures:
-  - "CadburyForCausalLM"
+  - "Cadbury70BMoEModel"
 
 # Model Dimensions
 hidden_size: 8192
-intermediate_size: 28672
 num_hidden_layers: 80
 num_attention_heads: 64
-num_key_value_heads: 8            # Grouped Query Attention (8:1 ratio) saves KV cache VRAM
-hidden_act: "silu"               # SwiGLU non-linear activation
+hidden_act: "silu"
 
-# Context & Position Embeddings (Extended to 32k via YaRN)
-max_position_embeddings: 32768
-rope_theta: 500000.0             # High base frequency for long-context stability
+# ==============================================================================
+# Multi-Head Latent Attention (MLA) — DeepSeek-V3 Style
+# ==============================================================================
+attention:
+  type: "multi_head_latent_attention"
+  num_heads: 64
+  head_dim: 128
+  q_lora_rank: 1536                     # Query low-rank compression
+  kv_lora_rank: 512                     # Key-Value low-rank compression (d_c = 512)
+  qk_rope_head_dim: 64                  # Decoupled RoPE head dimension (d_R = 64)
+  v_head_dim: 128
+  kv_cache_compression_ratio: 0.898     # ~90% reduction in KV cache memory vs standard MHA
+
+# Context & Position Embeddings (128k Long Context)
+max_position_embeddings: 131072
+rope_theta: 500000.0
 rope_scaling:
-  type: "yarn"                   # Yet another RoPE extensioN method (YaRN)
-  factor: 4.0                    # 4x scaling (8192 * 4 = 32,768 tokens)
+  type: "yarn"
+  factor: 16.0
   original_max_position_embeddings: 8192
   finetuned: true
+
+# ==============================================================================
+# Fine-Grained Sparse Mixture-of-Experts (MoE)
+# ==============================================================================
+moe:
+  num_routed_experts: 16                # 16 domain-specialized experts
+  num_shared_experts: 2                 # 2 always-active shared foundation experts
+  top_k: 2                              # Top-2 routed experts activated per token
+  expert_intermediate_size: 4096        # Fine-grained SwiGLU expert width
+  auxiliary_loss_free_balancing: true   # Dynamic router biases b_i (no quality-degrading aux loss)
+  bias_update_rate: 0.001
+  active_parameters_per_token: "14.1B"
 
 # Normalization & Regularization
 rms_norm_eps: 0.00001
 initializer_range: 0.02
-tie_word_embeddings: false        # Untied lm_head for improved code token precision
+tie_word_embeddings: false
 
 # Precision & Hardware Acceleration
 torch_dtype: "bfloat16"
 use_cache: true
-attn_implementation: "flash_attention_2"  # Fused kernel with O(N) memory scaling
+attn_implementation: "flash_attention_2"
 
 # Vocabulary & Core Special Tokens
 vocab_size: 128270
@@ -67,14 +90,14 @@ hypothesis_end_id: 128013
 # Adaptive Compute & Surgical RL Parameters
 # ==============================================================================
 adaptive_compute:
-  mtp_num_future_tokens: 2              # DeepSeek-V3 style Multi-Token Prediction lookahead
-  mtp_loss_weight: 0.3                  # Weight of auxiliary MTP prediction loss
-  entropy_early_exit_threshold: 0.45    # Shannon entropy threshold (bits) triggering </think> early exit
-  entropy_window_size: 15               # Moving average token window for entropy calculation
+  mtp_num_future_tokens: 2
+  mtp_loss_weight: 0.3
+  entropy_early_exit_threshold: 0.45
+  entropy_window_size: 15
 
 rl_efficiency_penalties:
-  tool_step_penalty: 0.02               # Fixed penalty per tool call to prevent churn
-  unused_file_read_penalty: 0.15        # Penalty per wasted file read polluting context
-  thinking_token_penalty_weight: 0.0005 # Length-penalized RL lambda per excess thought token
-  optimal_think_budget: 150             # Optimal token baseline for concise reasoning
-  anti_hacking_penalty: 3.0             # Severe penalty for test skipping or bare try-except pass
+  tool_step_penalty: 0.02
+  unused_file_read_penalty: 0.15
+  thinking_token_penalty_weight: 0.0005
+  optimal_think_budget: 150
+  anti_hacking_penalty: 3.0

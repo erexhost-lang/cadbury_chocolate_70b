@@ -1,116 +1,165 @@
-# 🍫 Cadbury-Chocolate 70B — Distributed Code Reasoning & Agentic LLM Pipeline
+# 🍫 Cadbury-Chocolate 70B Frontier V2 — Sparse MoE, MLA & Verifiable Test-Time Compute
 
-A complete, production-grade training architecture, synthetic reasoning pipeline, and execution-verified reinforcement learning framework for a **70-Billion parameter code-generation & reasoning language model**. 
+A complete, production-grade distributed training architecture, synthetic reasoning pipeline, compiler-LSP agent framework, and deterministic reinforcement learning system for a **70-Billion parameter code-generation & reasoning language model**. 
 
-Modeled after modern frontier architectures: **DeepSeek-R1 / DeepSeek-V3**, **Claude 3.5 Sonnet / Opus**, and **StarCoder2**.
+Modeled after frontier engineering breakthroughs: **DeepSeek-V3 / DeepSeek-Coder-V2**, **Claude 3.5 Sonnet / Opus**, and **OpenAI o1 / DeepSeek-R1**.
 
 ---
 
-## 🏗️ 4-Stage End-to-End Training Architecture
+## 🏗️ 5-Stage End-to-End Frontier Architecture
 
 ```mermaid
 flowchart TD
-    subgraph Stage1["Stage 1: Multi-Source Pretraining (CPT)"]
+    subgraph Stage1["Stage 1: Multi-Source Pretraining (CPT) & Sparse MoE"]
         A1["Raw Code Streams\n(The Stack v2, GitHub)"] --> A2["AST Import Parsing &\nTopological Repo DAG"]
         A2 --> A3["Fill-In-The-Middle (FIM)\n(50% PSM / SPM)"]
-        A3 --> A4["Constant-Length Multipacking\n(32k Context Tokens)"]
-        A4 --> A5["PyTorch FSDP + MTP Lookahead\n(Multi-Token Prediction Head, bf16)"]
+        A3 --> A4["Zero-Waste Sequence Packing\n(128k Context Tokens)"]
+        A4 --> A5["DeepSeek-V3 Sparse MoE + MLA\n(16 Routed + 2 Shared Experts, Top-2 Active)\n(Auxiliary-Loss-Free Dynamic Bias)"]
     end
 
-    subgraph Stage2["Stage 2: Synthetic Reasoning & Bayesian Agent Generation"]
-        B1["System Design Track\n(High RPS, SPOF, K8s/IaC)"]
-        B2["DSA & Complexity Track\n(Constraints, Big-O, TLE proofs)"]
-        B3["Bayesian Surgical Debugging\n(Ranked Prior Hypotheses)"]
+    subgraph Stage2["Stage 2: Synthetic Agentic & Software Evolution Data"]
+        B1["System Design & DSA Tracks\n(High RPS, SPOF, Big-O Proofs)"]
+        B2["Git Diff & PR Evolution\n(SEARCH/REPLACE Patch Format)"]
+        B3["Compiler LSP Agent Navigation\n(find_definition, references, diagnostics)"]
         B1 & B2 & B3 --> B4["Anti-Rumination Sanitizer\n(Prunes circular self-doubt loops)"]
         B4 --> B5["Structured ChatML JSONL\n(<think>, <hypothesis>, <tool_call>)"]
     end
 
-    subgraph Stage3["Stage 3: Masked SFT with NEFTune & Entropy Gate"]
+    subgraph Stage3["Stage 3: Masked SFT with NEFTune & MLA Caching"]
         B5 --> C1["Completion-Only Collator\n(Masks prompt & tool_output to -100)"]
         C1 --> C2["NEFTune Regularization\n(Noisy Embeddings alpha=5.0)"]
-        C2 --> C3["YaRN RoPE Scaling\n(32,768 Context Window)"]
+        C2 --> C3["MLA KV Cache Compression\n(d_c = 512, d_R = 64, 128k Context)"]
         A5 -. Base Weights .-> C3
     end
 
-    subgraph Stage4["Stage 4: GRPO with Surgical Efficiency Rewards (RLVR)"]
+    subgraph Stage4["Stage 4: GRPO with Verifiable Process Rewards (RLVR)"]
         C3 --> D1["GRPO Policy Optimization\n(Group Advantage A_i = (R_i - mean)/std)"]
-        D1 --> R1["Format & Tag Reward\n(<think>, <hypothesis>, JSON)"]
-        D1 --> R2["AST Syntax Reward\n(ast.parse compilation)"]
-        D1 --> R3["Sandbox Execution Reward\n(Unit Test Pass & Big-O Speed)"]
+        D1 --> R1["Deterministic Process Rewards\n(LSP hop count <= 2, clean diagnostics)"]
+        D1 --> R2["AST Syntax & Diff Reward\n(SEARCH/REPLACE compilation)"]
+        D1 --> R3["Isolated Sandbox Execution\n(Unit Test Pass & Big-O Speed)"]
         D1 --> R4["Length-Penalized Budget\n(-lambda * excess thought tokens)"]
-        D1 --> R5["Information-Gain Tool Reward\n(Penalizes wasted file reads & dumps)"]
-        D1 --> R6["Anti-Reward-Hacking Guardrail\n(Catches test skips & bare try-except)"]
-        R1 & R2 & R3 & R4 & R5 & R6 --> D2["Surgically Aligned 70B Model"]
+        D1 --> R5["Anti-Reward-Hacking Guardrail\n(Catches test skips & hardcoded cheats)"]
+        R1 & R2 & R3 & R4 & R5 --> D2["Frontier Aligned 70B MoE Weights"]
+    end
+
+    subgraph Stage5["Stage 5: Test-Time Compute Allocation"]
+        D2 --> E1["Entropy-Gated Router\n(Probe Reasoning Entropy H(p))"]
+        E1 -- "H < 0.55 (Certain)" --> E2["Fast Single-Pass (N=1)\n(Greedy / Low-Temp MoE Decoding)"]
+        E1 -- "H >= 0.55 (Ambiguous)" --> E3["Parallel Best-of-N (N=4)\n(Multi-Seed Sandbox Verification & Diff Pruning)"]
     end
 ```
 
 ---
 
-## 🏛️ Model Architecture & Mathematics (70B)
+## 🏛️ Model Architecture & Mathematics (Frontier V2)
 
 | Hyperparameter | Value | Architectural Purpose |
 | :--- | :--- | :--- |
-| **Active Parameters** | **~70.55 Billion** | Deep reasoning across system architecture, algorithms, and 80+ languages |
+| **Total Parameters** | **~70.55 Billion** | Deep reasoning across system architecture, algorithms, and 80+ programming languages |
+| **Active Parameters / Token** | **~14.2 Billion** | Fine-grained **16 Routed Experts + 2 Shared Experts (Top-2 Active)** |
 | **Layers (`n_layer`)** | **80** | Deep hierarchical abstraction of program logic, dataflow, and syntax |
 | **Hidden Dimension (`d_model`)** | **8,192** | Wide residual stream representation space |
-| **Intermediate Size (`d_ff`)** | **28,672** | SwiGLU feed-forward layer (~3.5× hidden dimension) |
-| **Attention Heads (`n_head`)** | **64** | Multi-head attention (Query dimension = 128) |
-| **KV Heads (`num_kv_heads`)** | **8** | **Grouped-Query Attention (GQA)** (8:1 ratio) to save KV cache |
-| **Context Window** | **32,768 tokens** | Full repository context via **YaRN RoPE Scaling** (factor 4.0) |
+| **Attention Architecture** | **Multi-Head Latent Attention (MLA)** | DeepSeek-V3 style low-rank KV compression |
+| **KV Compression Dim ($d_c$)** | **512** | Key-Value down-projection reducing KV cache by ~90% |
+| **Decoupled RoPE Dim ($d_R$)** | **64** | Position keys decoupled from KV cache, avoiding cache expansion |
+| **Number of Heads** | **64** | Attention heads (head dimension = 128) |
+| **Expert Intermediate Size** | **4,096** | Fine-grained expert width for specialized algorithmic/domain routing |
+| **Load Balancing Mechanism** | **Auxiliary-Loss-Free** | Dynamic expert bias $b_i \leftarrow b_i - \gamma \text{sign}(\text{load}_i - \bar{\text{load}})$ |
+| **Context Window** | **131,072 tokens (128k)** | Full repository context enabled by MLA KV cache compression |
 | **Vocabulary Size** | **128,270** | Byte-Level BPE with specialized `<think>`, `<hypothesis>`, `<tool_call>`, FIM tags |
 | **Position Embeddings** | **RoPE ($\theta = 500,000$)** | High base frequency for long-context extrapolation |
-| **Attention Kernel** | **FlashAttention-2** | Hardware-fused $O(N)$ memory attention |
 
 ---
 
-## 🧠 Adaptive Compute & Surgical Agentic Localization
+## 💾 Multi-Head Latent Attention (MLA) vs GQA Memory Math
 
-Cadbury-Chocolate introduces two critical architectural innovations designed to eliminate the two most common failure modes of reasoning models: **Overthinking on simple queries** and **Context Pollution during debugging**.
+Traditional Multi-Head Attention (MHA) and Grouped-Query Attention (GQA) store full-rank Key and Value vectors in GPU VRAM for every token in the context window. At 128k context, this exhausts H100 VRAM.
 
-### 1. Bayesian Hypothesis Localization (`data_synthesis/schemas.py`)
-Junior coding models exhibit "blind browsing" — running `ls -R` or opening dozens of files when presented with a bug. Cadbury enforces a **Bayesian prior formulation**:
-* When faced with a multi-tier or cross-stack error (e.g. database to API to frontend), the model **must** calculate a ranked probability distribution across candidate layers inside `<hypothesis>` *before* calling any tool:
-  $$P(H_1 = \text{DB Migration}) = 0.65, \quad P(H_2 = \text{Serializer}) = 0.25, \quad P(H_3 = \text{UI State}) = 0.10$$
-* **Surgical Line Slicing:** Reading whole files is forbidden. Trajectories use `read_file` with explicit `start_line` and `end_line` slices (e.g. lines 35–55) to maximize Context Signal-to-Noise Ratio (SNR).
+### KV Cache Memory Per Token Equation:
+$$\text{Memory}_{\text{MHA}} = 2 \times n_{\text{layers}} \times n_{\text{heads}} \times d_{\text{head}} \times 2\text{ bytes}$$
+$$\text{Memory}_{\text{MLA}} = (d_c + d_R) \times n_{\text{layers}} \times 2\text{ bytes}$$
 
-### 2. Anti-Rumination & Entropy-Aware Early Exit (`training/adaptive_compute.py`)
-* **Shannon Entropy Monitoring:** During generation of `<think>`, the model computes token prediction entropy:
-  $$H(p) = -\sum_{v \in V} p(v) \log_2 p(v)$$
-* **Early Exit Trigger:** When the moving average entropy over a 15-token window is below $\tau = 0.45$ (indicating high certainty / straightforward task), the `EntropyReasoningGate` terminates `<think>` immediately with `</think>\n\n`, answering directly without wasting compute.
-* **Synthetic Filter:** The dataset generator automatically sanitizes repetitive self-doubt loops (*"Wait, let me rethink"*, *"Actually, maybe not"*).
-
-### 3. Multi-Token Prediction (MTP) Lookahead
-* Implements DeepSeek-V3 style **Multi-Token Prediction**:
-  $$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{main}} + \lambda_{\text{MTP}} \sum_{k=1}^2 \mathcal{L}_{\text{MTP}_k}$$
-* Auxiliary prediction heads train the model to anticipate $t+2$ and $t+3$ tokens concurrently, improving structural code planning.
-
-### 4. Surgical Reinforcement Learning Rewards (`training/rl_grpo_verifier.py`)
-In post-SFT GRPO training, policy updates are driven by 6 verifiable reward heads:
-1. **Length-Penalized Thinking Budget:**
-   $$R_{\text{length}} = -\lambda \cdot \max(0, \text{Tokens}_{\text{think}} - B_{\text{optimal}})$$
-   Among rollouts that pass unit tests, assigning the highest reward to the most concise thought process teaches dynamic effort scaling.
-2. **Information-Gain Tool Reward:**
-   * Step penalty ($-0.02$) per tool call to prevent tool churn.
-   * Compares files inspected via `read_file` against files modified in the final git patch. Reading $>2$ irrelevant files incurs a $-0.15$ penalty per wasted read. Blind directory dumps (`ls -R`, `find .`) receive a $-0.5$ penalty. Surgical 1-hop localization receives a $+0.5$ bonus.
-3. **Anti-Reward-Hacking Guardrail:**
-   * Penalizes test-skipping cheats (`@pytest.mark.skip`, `skipTest`), bare `try...except: pass`, and hardcoded return values with a severe $-3.0$ penalty.
-
----
-
-## ⚡ Cluster Hardware & VRAM Memory Math
-
-* **Model Weights (in bfloat16):** $70.55\text{B} \times 2\text{ bytes} \approx \mathbf{141.1\text{ GB}}$
-* **Gradients (in bfloat16):** $70.55\text{B} \times 2\text{ bytes} \approx \mathbf{141.1\text{ GB}}$
-* **AdamW Optimizer States (fp32 master weights, momentum, variance):** $70.55\text{B} \times 8\text{ bytes} \approx \mathbf{564.4\text{ GB}}$
-* **Total Static Pretraining Footprint:** $\approx \mathbf{846.6\text{ GB}}$
-
-### Cluster Feasibility Matrix
-
-| Setup | Hardware | Method | Memory per GPU | Target Phase |
+| Attention Mechanism | Dimension per Token / Layer | 32k Context KV Cache (80 Layers) | 128k Context KV Cache (80 Layers) | VRAM Reduction |
 | :--- | :--- | :--- | :--- | :--- |
-| **Multi-Node Cluster** | **32x H100 (80GB)** (4 Nodes) | PyTorch FSDP FULL_SHARD | $\approx 26.5\text{ GB}$ static + activations | Stage 1 CPT & Stage 3 SFT |
-| **Mid-Scale Cluster** | **16x A100 (80GB)** (2 Nodes) | FSDP + Act. Checkpointing | $\approx 53.0\text{ GB}$ static + activations | Stage 3 SFT & Stage 4 GRPO |
-| **Single GPU Developer** | **1x A100 / H100 (80GB)** | 4-bit NF4 QLoRA + Paged AdamW | $\approx 45.0\text{ GB}$ total VRAM | Single-Node Fine-Tuning |
+| **Standard MHA (64 heads)** | $2 \times 64 \times 128 = \mathbf{16,384\text{ floats}}$ | $\approx \mathbf{84.0\text{ GB}}$ | $\approx \mathbf{336.0\text{ GB}}$ *(OOM on 80GB GPU)* | Baseline ($1.0\times$) |
+| **GQA (8 KV heads)** | $2 \times 8 \times 128 = \mathbf{2,048\text{ floats}}$ | $\approx \mathbf{10.5\text{ GB}}$ | $\approx \mathbf{42.0\text{ GB}}$ | $8.0\times$ smaller |
+| **Cadbury MLA ($d_c=512, d_R=64$)** | $512 + 64 = \mathbf{576\text{ floats}}$ | $\approx \mathbf{2.9\text{ GB}}$ | $\approx \mathbf{11.8\text{ GB}}$ | **$\approx 28.4\times$ smaller ($\approx 90\%$ vs GQA)** |
+
+Thanks to MLA, Cadbury-70B can maintain a full **128,000 token context window** during inference while reserving over 85% of GPU memory for weights and activations.
+
+---
+
+## ⚖️ Auxiliary-Loss-Free Load Balancing
+
+Traditional MoE routers use an auxiliary balance loss ($\mathcal{L}_{\text{aux}} = \alpha \sum f_i P_i$) added to the main training loss. This forces the router to route tokens suboptimal for code generation just to balance GPU load, directly damaging code perplexity.
+
+Cadbury-70B Frontier V2 implements **Auxiliary-Loss-Free Balancing**:
+1. Token routing logits are computed as:
+   $$s_{i,t} = \text{Top2}\left( \text{Softmax}\left( W_r \cdot x_t + b_i \right) \right)$$
+2. An autonomous dynamic bias vector $b_i$ is maintained and updated after each forward pass without gradient backpropagation:
+   $$b_i \leftarrow b_i - \gamma \cdot \text{sign}\left( \text{load}_i - \bar{\text{load}} \right)$$
+3. If expert $i$ is overloaded ($\text{load}_i > \bar{\text{load}}$), its bias is decremented, gently shifting boundary tokens to under-utilized experts without perturbing the model's language gradients.
+
+---
+
+## 🛠️ Compiler & Language Server Protocol (LSP) Tools
+
+To eliminate junior agent behaviors (e.g. dumping entire files or running recursive grep searches), Cadbury-70B is trained on compiler-grade LSP agent tools (`data_synthesis/lsp_tools.py`):
+
+1. **`lsp_find_definition(symbol, context_file, line, character)`:** Jumps directly to symbol declaration across project repositories without grepping.
+2. **`lsp_find_references(symbol, file_path)`:** Identifies all downstream consumers before modifying code to prevent breaking changes.
+3. **`lsp_get_type_signature(symbol, file_path)`:** Retrieves AST type signatures, function parameter definitions, and return contracts.
+4. **`lsp_get_diagnostics(file_path)`:** Runs linter, syntax checker, and compiler error diagnostics to verify patch validity.
+
+---
+
+## ✂️ Git Diff & PR Evolution Pipeline (`SEARCH/REPLACE`)
+
+Cadbury-70B replaces full-file rewriting with surgical Git hunks (`data_processing/git_diff_pipeline.py`). Training data converts GitHub commits and pull requests into strict `SEARCH/REPLACE` blocks:
+
+```text
+# File: services/auth/jwt_validator.py
+<<<<<<< SEARCH
+def verify_token(token: str) -> bool:
+    payload = jwt.decode(token, SECRET_KEY)
+    return True
+=======
+def verify_token(token: str) -> bool:
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=["HS256"])
+        return payload.get("exp", 0) > time.time()
+    except jwt.PyJWTError:
+        return False
+>>>>>>> REPLACE
+```
+
+---
+
+## 🎯 Deterministic Verifiable Step Rewards (Correction #4)
+
+Neural Process Reward Models (PRMs) are computationally expensive and prone to reward hacking (adversarial tokens triggering artificially inflated intermediate scores). Cadbury-70B replaces neural PRMs with **Deterministic Verifiable Step Rewards** in `training/rl_grpo_verifier.py`:
+
+- **Surgical LSP Navigation Reward:** Rewarded ($+0.5$) when localizing bugs within $\le 2$ hops. Penalized ($-0.3$) for $>3$ unnecessary hops.
+- **Syntactic Diff Verification:** Parses `SEARCH/REPLACE` blocks with Python AST; syntax errors receive a $-1.0$ penalty.
+- **Diagnostic Cleanliness:** Using `lsp_get_diagnostics` to verify 0 syntax/linter errors receives a $+0.5$ bonus.
+- **Functional Execution:** Unit test pass rates verified inside isolated execution sandboxes with strict time and memory bounds.
+
+---
+
+## ⚡ Entropy-Gated Best-of-N Test-Time Compute (Correction #5)
+
+Running full Monte Carlo Tree Search (MCTS) or unconditional Best-of-N on every query introduces extreme latency and rumination on simple tasks. Cadbury-70B implements **Confidence-Gated Sandbox Routing** (`inference/test_time_router.py`):
+
+1. **Entropy Probe:** During generation of the initial reasoning prefix, the router calculates predictive Shannon entropy:
+   $$H(p) = -\sum_{v \in V} p(v) \log_2 p(v)$$
+2. **Fast Single-Pass Path ($H < 0.55$):**
+   - For straightforward syntax, algorithms, or boilerplate tasks, the model exhibits low entropy.
+   - Routes immediately to single-pass greedy decoding ($N=1$). Zero latency overhead.
+3. **Parallel Best-of-N Sandbox Search ($H \ge 0.55$):**
+   - For ambiguous bugs, race conditions, or complex multi-file architectural refactors, entropy spikes.
+   - Spawns $N=4$ parallel rollouts with exploratory sampling temperature ($\tau = 0.7$).
+   - Evaluates each rollout against AST parsing and isolated unit test execution.
+   - Selects the winning solution deterministically: **Passing unit tests > AST validity > Minimal diff footprint**.
 
 ---
 
@@ -119,7 +168,7 @@ In post-SFT GRPO training, policy updates are driven by 6 verifiable reward head
 ```text
 cadbury-chocolate/
 ├── configs/
-│   ├── model_70b_config.yaml     # 70.55B architecture + YaRN RoPE (32k) + MTP/RL configs
+│   ├── model_70b_config.yaml     # 70B MoE (16 routed, 2 shared) + MLA (d_c=512, d_R=64) + 128k context
 │   ├── fsdp_config.yaml          # PyTorch FSDP FULL_SHARD cluster setup
 │   ├── deepspeed_zero3.json      # DeepSpeed ZeRO-3 offload configuration
 │   └── qlora_config.yaml         # 4-bit parameter-efficient fine-tuning config
@@ -132,18 +181,26 @@ cadbury-chocolate/
 │   ├── secret_scrubber.py        # PII, API tokens, and cryptographic key sanitizer
 │   ├── minhash_dedup.py          # MinHash LSH near-deduplication (Jaccard similarity)
 │   ├── quality_filter.py         # Line-length, entropy, and autogen heuristics
-│   └── repo_packer_fim.py        # Topological AST import sorting & repo multipacking
+│   ├── repo_packer_fim.py        # Topological AST import sorting & repo multipacking
+│   └── git_diff_pipeline.py      # SEARCH/REPLACE block parser & commit/PR evolution formatter
 ├── data_synthesis/
 │   ├── schemas.py                # BayesianHypothesis, ChatML & XML schemas (<hypothesis>, <think>)
-│   └── generate_reasoning_traces.py # Surgical System Design, DSA, & Anti-Rumination ReAct generator
+│   ├── generate_reasoning_traces.py # Surgical System Design, DSA, & Anti-Rumination ReAct generator
+│   └── lsp_tools.py              # Compiler LSP tools (definition, references, diagnostics, types)
+├── inference/
+│   ├── __init__.py               # Inference module exports
+│   └── test_time_router.py       # Confidence-Gated Best-of-N Sandbox Router (Correction #5)
+├── model/
+│   ├── __init__.py               # Model exports (MLA, MoE, Router, Cadbury70BMoEModel)
+│   └── moe_mla_architecture.py   # Multi-Head Latent Attention & Sparse MoE PyTorch modules
 ├── tokenization/
 │   ├── train_code_tokenizer.py   # Byte-Level BPE with special tags (<think>, <hypothesis>, <tool_call>)
-│   └── sequence_packer.py        # Zero-waste constant-length multipacking (32k ctx)
+│   └── sequence_packer.py        # Zero-waste constant-length multipacking (128k ctx)
 ├── training/
 │   ├── adaptive_compute.py       # Multi-Token Prediction (MTP) & Entropy Early-Exit Gate
 │   ├── pretrain_fsdp.py          # Multi-node FSDP pretrainer with FlashAttention-2
 │   ├── sft_reasoning_trainer.py  # Completion-Only Masked SFT with NEFTune regularizer
-│   ├── rl_grpo_verifier.py       # GRPO with 6 verifiable rewards (length, info-gain, anti-hacking)
+│   ├── rl_grpo_verifier.py       # GRPO with Deterministic Verifiable Step Rewards
 │   ├── train_qlora.py            # 4-bit QLoRA fine-tuning for 70B on 1x 80GB GPU
 │   └── launch_slurm.sh           # HPC SLURM submission script (4 nodes x 8 GPUs)
 ├── utils/
@@ -155,19 +212,29 @@ cadbury-chocolate/
 
 ---
 
-## 🚀 Cluster Execution Commands
+## 🚀 Execution & Verification Commands
 
-### 1. Generate Surgical Reasoning Trajectories
+### 1. Test Confidence-Gated Best-of-N Test-Time Compute Router
 ```bash
-python data_synthesis/generate_reasoning_traces.py
+python inference/test_time_router.py
 ```
 
-### 2. Pack Repositories with Topological Sorting & FIM
+### 2. Verify MoE + Multi-Head Latent Attention (MLA) Architecture
 ```bash
-python data_processing/repo_packer_fim.py
+python model/moe_mla_architecture.py
 ```
 
-### 3. Launch Masked SFT with NEFTune across Multi-Node Cluster
+### 3. Verify Compiler LSP Agent Navigation Tools
+```bash
+python data_synthesis/lsp_tools.py
+```
+
+### 4. Verify Git Diff `SEARCH/REPLACE` Pipeline
+```bash
+python data_processing/git_diff_pipeline.py
+```
+
+### 5. Launch Multi-Node Masked SFT with NEFTune
 ```bash
 torchrun \
     --nnodes=4 \
@@ -176,13 +243,13 @@ torchrun \
     --rdzv_backend=c10d \
     --rdzv_endpoint=master-node:29500 \
     training/sft_reasoning_trainer.py \
-    --model-path "checkpoints/cadbury-70b" \
+    --model-path "checkpoints/cadbury-70b-moe" \
     --data-file "data/processed/sft_reasoning/sample_reasoning_data.jsonl" \
     --neftune-alpha 5.0 \
-    --max-seq-len 32768
+    --max-seq-len 131072
 ```
 
-### 4. Run GRPO Policy Optimization with Length & Info-Gain Rewards
+### 6. Run GRPO with Deterministic Step Rewards
 ```bash
 torchrun --nproc_per_node=8 training/rl_grpo_verifier.py
 ```
@@ -190,4 +257,4 @@ torchrun --nproc_per_node=8 training/rl_grpo_verifier.py
 ---
 
 ## 📜 License
-MIT License. Built for advanced code reasoning research, autonomous software engineering agents, and cluster deployment.
+MIT License. Built for advanced code reasoning research, autonomous software engineering agents, and high-performance cluster deployment.
